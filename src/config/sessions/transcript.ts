@@ -1,4 +1,5 @@
 import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding-agent";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { SessionEntry } from "./types.js";
@@ -118,30 +119,26 @@ export async function appendAssistantMessageToSessionTranscript(params: {
 
   await ensureSessionHeader({ sessionFile, sessionId: entry.sessionId });
 
+  // Store delivery-mirror as a custom JSONL entry (type: "custom") instead of
+  // a regular message (type: "message"). This ensures the mirrored text is
+  // recorded in the transcript for auditing, but is NOT included in the
+  // conversation history sent to the LLM. Previously, storing it as an
+  // assistant message would prime the model with a greeting/status message it
+  // never generated, causing self-reinforcing shallow responses.
   const sessionManager = SessionManager.open(sessionFile);
-  sessionManager.appendMessage({
-    role: "assistant",
-    content: [{ type: "text", text: mirrorText }],
-    api: "openai-responses",
-    provider: "openclaw",
-    model: "delivery-mirror",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        total: 0,
-      },
+  const parentId = sessionManager.getLeafId?.() ?? null;
+  const customEntry = {
+    type: "custom",
+    customType: "delivery-mirror",
+    data: {
+      text: mirrorText,
+      timestamp: Date.now(),
     },
-    stopReason: "stop",
-    timestamp: Date.now(),
-  });
+    id: crypto.randomUUID().slice(0, 8),
+    parentId,
+    timestamp: new Date().toISOString(),
+  };
+  fs.appendFileSync(sessionFile, `${JSON.stringify(customEntry)}\n`, "utf-8");
 
   if (!entry.sessionFile || entry.sessionFile !== sessionFile) {
     await updateSessionStore(

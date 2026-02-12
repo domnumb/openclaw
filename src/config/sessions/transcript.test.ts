@@ -104,11 +104,10 @@ describe("appendAssistantMessageToSessionTranscript", () => {
       expect(header.type).toBe("session");
       expect(header.id).toBe(sessionId);
 
-      const messageLine = JSON.parse(lines[1]);
-      expect(messageLine.type).toBe("message");
-      expect(messageLine.message.role).toBe("assistant");
-      expect(messageLine.message.content[0].type).toBe("text");
-      expect(messageLine.message.content[0].text).toBe("Hello from delivery mirror!");
+      const customLine = JSON.parse(lines[1]);
+      expect(customLine.type).toBe("custom");
+      expect(customLine.customType).toBe("delivery-mirror");
+      expect(customLine.data.text).toBe("Hello from delivery mirror!");
     }
   });
 });
