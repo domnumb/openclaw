@@ -84,3 +84,7 @@ USER.md
 !.agent/workflows/
 /local/
 package-lock.json
+bernard_bundle_*.tgz
+.venv*/
+.coverage
+*.db
