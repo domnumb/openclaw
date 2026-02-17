@@ -34,8 +34,13 @@ export async function handleDiscordMessageAction(
 
   if (action === "send") {
     const to = readStringParam(params, "to", { required: true });
+    const rawComponents = params.components;
     const components =
-      params.components && typeof params.components === "object" ? params.components : undefined;
+      Array.isArray(rawComponents) || typeof rawComponents === "function"
+        ? rawComponents
+        : typeof rawComponents === "object" && rawComponents
+          ? rawComponents
+          : undefined;
     const content = readStringParam(params, "message", {
       required: !components,
       allowEmpty: true,
@@ -46,11 +51,6 @@ export async function handleDiscordMessageAction(
       readStringParam(params, "path", { trim: false }) ??
       readStringParam(params, "filePath", { trim: false });
     const replyTo = readStringParam(params, "replyTo");
-    const rawComponents = params.components;
-    const components =
-      Array.isArray(rawComponents) || typeof rawComponents === "function"
-        ? rawComponents
-        : undefined;
     const rawEmbeds = params.embeds;
     const embeds = Array.isArray(rawEmbeds) ? rawEmbeds : undefined;
     const asVoice = params.asVoice === true;
