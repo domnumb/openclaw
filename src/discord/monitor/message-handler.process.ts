@@ -22,6 +22,10 @@ import { createTypingCallbacks } from "../../channels/typing.js";
 import { resolveMarkdownTableMode } from "../../config/markdown-tables.js";
 import { readSessionUpdatedAt, resolveStorePath } from "../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../globals.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { opsPost } from "./ops-reporter.js";
+
+const processLog = createSubsystemLogger("discord/process");
 import { buildAgentSessionKey } from "../../routing/resolve-route.js";
 import { resolveThreadSessionKeys } from "../../routing/session-key.js";
 import { buildUntrustedChannelMetadata } from "../../security/channel-metadata.js";
@@ -113,7 +117,14 @@ export async function processDiscordMessage(ctx: DiscordMessagePreflightContext)
       }).then(
         () => true,
         (err) => {
-          logVerbose(`discord react failed for channel ${message.channelId}: ${String(err)}`);
+          processLog.warn(
+            `discord react (ACK) failed for channel ${message.channelId}: ${String(err)}`,
+            {
+              channelId: message.channelId,
+              messageId: message.id,
+              ackReaction,
+            },
+          );
           return false;
         },
       )
@@ -330,7 +341,11 @@ export async function processDiscordMessage(ctx: DiscordMessagePreflightContext)
         }
       : undefined,
     onRecordError: (err) => {
-      logVerbose(`discord: failed updating session meta: ${String(err)}`);
+      processLog.error(`discord: failed updating session meta: ${String(err)}`, {
+        channelId: message.channelId,
+        messageId: message.id,
+        sessionKey: ctxPayload.SessionKey,
+      });
     },
   });
 
@@ -393,20 +408,32 @@ export async function processDiscordMessage(ctx: DiscordMessagePreflightContext)
     }).onReplyStart,
   });
 
-  const { queuedFinal, counts } = await dispatchInboundMessage({
-    ctx: ctxPayload,
-    cfg,
-    dispatcher,
-    replyOptions: {
-      ...replyOptions,
-      skillFilter: channelConfig?.skills,
-      disableBlockStreaming:
-        typeof discordConfig?.blockStreaming === "boolean"
-          ? !discordConfig.blockStreaming
-          : undefined,
-      onModelSelected,
-    },
-  });
+  let queuedFinal: boolean;
+  let counts: { final: number };
+  try {
+    ({ queuedFinal, counts } = await dispatchInboundMessage({
+      ctx: ctxPayload,
+      cfg,
+      dispatcher,
+      replyOptions: {
+        ...replyOptions,
+        skillFilter: channelConfig?.skills,
+        disableBlockStreaming:
+          typeof discordConfig?.blockStreaming === "boolean"
+            ? !discordConfig.blockStreaming
+            : undefined,
+        onModelSelected,
+      },
+    }));
+  } catch (dispatchErr) {
+    markDispatchIdle();
+    opsPost(`Discord agent dispatch failed: ${String(dispatchErr)}`, {
+      channelId: message.channelId,
+      messageId: message.id,
+      sessionKey: ctxPayload.SessionKey,
+    });
+    return;
+  }
   markDispatchIdle();
   if (!queuedFinal) {
     if (isGuildMessage) {

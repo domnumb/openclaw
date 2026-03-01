@@ -49,6 +49,7 @@ import {
   resolveTimestampMs,
 } from "./format.js";
 import { resolveDiscordChannelInfo, resolveDiscordMessageText } from "./message-utils.js";
+import { recordPreflightDrop } from "./ops-reporter.js";
 import { resolveDiscordSenderIdentity, resolveDiscordWebhookId } from "./sender-identity.js";
 import { resolveDiscordSystemEvent } from "./system-events.js";
 import { resolveDiscordThreadChannel, resolveDiscordThreadParentInfo } from "./threading.js";
@@ -96,7 +97,11 @@ export async function preflightDiscordMessage(
 
   if (author.bot) {
     if (!allowBots && !sender.isPluralKit) {
-      logVerbose("discord: drop bot message (allowBots=false)");
+      logger.info(
+        { authorId: author.id, reason: "bot-disallowed" },
+        "discord: drop bot message (allowBots=false)",
+      );
+      recordPreflightDrop("bot-disallowed");
       return null;
     }
   }
@@ -110,11 +115,19 @@ export async function preflightDiscordMessage(
   );
 
   if (isGroupDm && !params.groupDmEnabled) {
-    logVerbose("discord: drop group dm (group dms disabled)");
+    logger.info(
+      { channelId: message.channelId, reason: "group-dm-disabled" },
+      "discord: drop group dm (group dms disabled)",
+    );
+    recordPreflightDrop("group-dm-disabled");
     return null;
   }
   if (isDirectMessage && !params.dmEnabled) {
-    logVerbose("discord: drop dm (dms disabled)");
+    logger.info(
+      { channelId: message.channelId, reason: "dm-disabled" },
+      "discord: drop dm (dms disabled)",
+    );
+    recordPreflightDrop("dm-disabled");
     return null;
   }
 
@@ -122,7 +135,11 @@ export async function preflightDiscordMessage(
   let commandAuthorized = true;
   if (isDirectMessage) {
     if (dmPolicy === "disabled") {
-      logVerbose("discord: drop dm (dmPolicy: disabled)");
+      logger.info(
+        { channelId: message.channelId, reason: "dm-policy-disabled" },
+        "discord: drop dm (dmPolicy: disabled)",
+      );
+      recordPreflightDrop("dm-policy-disabled");
       return null;
     }
     if (dmPolicy !== "open") {
@@ -175,9 +192,11 @@ export async function preflightDiscordMessage(
             }
           }
         } else {
-          logVerbose(
+          logger.info(
+            { senderId: sender.id, dmPolicy, allowMatchMeta, reason: "unauthorized-dm" },
             `Blocked unauthorized discord sender ${sender.id} (dmPolicy=${dmPolicy}, ${allowMatchMeta})`,
           );
+          recordPreflightDrop("unauthorized-dm");
         }
         return null;
       }
@@ -224,9 +243,13 @@ export async function preflightDiscordMessage(
   }
 
   // Fresh config for bindings lookup; other routing inputs are payload-derived.
-  const memberRoleIds = Array.isArray(params.data.member?.roles)
-    ? params.data.member.roles.map((roleId: string) => String(roleId))
-    : [];
+  // FIX-F02: prefer rawMember.roles (plain string IDs) over member.roles (mention objects)
+  const rawRoles = (params.data as any).rawMember?.roles;
+  const memberRoleIds = Array.isArray(rawRoles)
+    ? rawRoles.map((roleId: string) => String(roleId))
+    : Array.isArray(params.data.member?.roles)
+      ? params.data.member.roles.map((roleId: string) => String(roleId))
+      : [];
   const route = resolveAgentRoute({
     cfg: loadConfig(),
     channel: "discord",
@@ -256,7 +279,11 @@ export async function preflightDiscordMessage(
     (message.type === MessageType.ChatInputCommand ||
       message.type === MessageType.ContextMenuCommand)
   ) {
-    logVerbose("discord: drop channel command message");
+    logger.info(
+      { channelId: message.channelId, reason: "channel-command" },
+      "discord: drop channel command message",
+    );
+    recordPreflightDrop("channel-command");
     return null;
   }
 
@@ -278,9 +305,11 @@ export async function preflightDiscordMessage(
     logDebug(
       `[discord-preflight] guild blocked: guild_id=${params.data.guild_id} guildEntries keys=${Object.keys(params.guildEntries).join(",")}`,
     );
-    logVerbose(
+    logger.info(
+      { guildId: params.data.guild_id, reason: "guild-not-allowed" },
       `Blocked discord guild ${params.data.guild_id ?? "unknown"} (not in discord.guilds)`,
     );
+    recordPreflightDrop("guild-not-allowed");
     return null;
   }
 
@@ -325,9 +354,11 @@ export async function preflightDiscordMessage(
   }
   if (isGuildMessage && channelConfig?.enabled === false) {
     logDebug(`[discord-preflight] drop: channel disabled`);
-    logVerbose(
+    logger.info(
+      { channelId: message.channelId, channelMatchMeta, reason: "channel-disabled" },
       `Blocked discord channel ${message.channelId} (channel disabled, ${channelMatchMeta})`,
     );
+    recordPreflightDrop("channel-disabled");
     return null;
   }
 
@@ -356,24 +387,47 @@ export async function preflightDiscordMessage(
     })
   ) {
     if (params.groupPolicy === "disabled") {
-      logVerbose(`discord: drop guild message (groupPolicy: disabled, ${channelMatchMeta})`);
+      logger.info(
+        {
+          channelId: message.channelId,
+          groupPolicy: params.groupPolicy,
+          channelMatchMeta,
+          reason: "group-policy-disabled",
+        },
+        `discord: drop guild message (groupPolicy: disabled, ${channelMatchMeta})`,
+      );
     } else if (!channelAllowlistConfigured) {
-      logVerbose(
+      logger.info(
+        {
+          channelId: message.channelId,
+          groupPolicy: params.groupPolicy,
+          channelMatchMeta,
+          reason: "group-policy-no-allowlist",
+        },
         `discord: drop guild message (groupPolicy: allowlist, no channel allowlist, ${channelMatchMeta})`,
       );
     } else {
-      logVerbose(
+      logger.info(
+        {
+          channelId: message.channelId,
+          groupPolicy: params.groupPolicy,
+          channelMatchMeta,
+          reason: "channel-not-in-allowlist",
+        },
         `Blocked discord channel ${message.channelId} not in guild channel allowlist (groupPolicy: allowlist, ${channelMatchMeta})`,
       );
     }
+    recordPreflightDrop("group-policy");
     return null;
   }
 
   if (isGuildMessage && channelConfig?.allowed === false) {
     logDebug(`[discord-preflight] drop: channelConfig.allowed===false`);
-    logVerbose(
+    logger.info(
+      { channelId: message.channelId, channelMatchMeta, reason: "channel-not-allowed" },
       `Blocked discord channel ${message.channelId} not in guild channel allowlist (${channelMatchMeta})`,
     );
+    recordPreflightDrop("channel-not-allowed");
     return null;
   }
   if (isGuildMessage) {
@@ -546,14 +600,14 @@ export async function preflightDiscordMessage(
   if (isGuildMessage && shouldRequireMention) {
     if (botId && mentionGate.shouldSkip) {
       logDebug(`[discord-preflight] drop: no-mention`);
-      logVerbose(`discord: drop guild message (mention required, botId=${botId})`);
       logger.info(
         {
           channelId: message.channelId,
           reason: "no-mention",
         },
-        "discord: skipping guild message",
+        "discord: skipping guild message (mention required)",
       );
+      recordPreflightDrop("no-mention");
       recordPendingHistoryEntryIfEnabled({
         historyMap: params.guildHistories,
         historyKey: message.channelId,
@@ -566,7 +620,11 @@ export async function preflightDiscordMessage(
 
   if (isGuildMessage && hasAccessRestrictions && !memberAllowed) {
     logDebug(`[discord-preflight] drop: member not allowed`);
-    logVerbose(`Blocked discord guild sender ${sender.id} (not in users/roles allowlist)`);
+    logger.info(
+      { senderId: sender.id, channelId: message.channelId, reason: "member-not-allowed" },
+      `Blocked discord guild sender ${sender.id} (not in users/roles allowlist)`,
+    );
+    recordPreflightDrop("member-not-allowed");
     return null;
   }
 
@@ -588,7 +646,11 @@ export async function preflightDiscordMessage(
 
   if (!messageText) {
     logDebug(`[discord-preflight] drop: empty content`);
-    logVerbose(`discord: drop message ${message.id} (empty content)`);
+    logger.info(
+      { messageId: message.id, channelId: message.channelId, reason: "empty-content" },
+      `discord: drop message ${message.id} (empty content)`,
+    );
+    recordPreflightDrop("empty-content");
     return null;
   }
 

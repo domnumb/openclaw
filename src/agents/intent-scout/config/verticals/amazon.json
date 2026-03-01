@@ -1,0 +1,85 @@
+{
+  "id": "amazon",
+  "name": "Amazon Associates",
+  "platform": "quora",
+  "affiliateTag": "REPLACE_WITH_TAG",
+  "baseUrl": "https://www.amazon.fr",
+  "disclosure": "*(Lien affilié — je touche une petite commission sans surcoût pour toi)*",
+  "minScore": 8,
+  "searchQueries": [
+    "site:quora.com meilleur produit",
+    "site:quora.com quel produit choisir",
+    "site:quora.com recommandation produit",
+    "site:quora.com avis produit",
+    "site:quora.com acheter",
+    "site:quora.com best product to buy",
+    "site:quora.com which product should I buy",
+    "site:quora.com what is the best"
+  ],
+  "buyIntentSignals": [
+    "acheter",
+    "meilleur",
+    "recommander",
+    "choisir",
+    "avis",
+    "buy",
+    "best",
+    "recommend",
+    "which one",
+    "should i get",
+    "worth it",
+    "vs",
+    "compare",
+    "review"
+  ],
+  "categories": [
+    {
+      "id": "tech",
+      "keywords": [
+        "ordinateur",
+        "laptop",
+        "écouteurs",
+        "casque",
+        "smartphone",
+        "tablette",
+        "clavier",
+        "souris",
+        "webcam",
+        "computer",
+        "headphones",
+        "keyboard",
+        "mouse"
+      ],
+      "searchSuffix": "tech"
+    },
+    {
+      "id": "maison",
+      "keywords": [
+        "aspirateur",
+        "robot",
+        "cafetière",
+        "friteuse",
+        "robot cuisine",
+        "vacuum",
+        "coffee maker",
+        "air fryer"
+      ],
+      "searchSuffix": "home"
+    },
+    {
+      "id": "sport",
+      "keywords": [
+        "vélo",
+        "tapis roulant",
+        "haltères",
+        "yoga",
+        "running",
+        "bike",
+        "treadmill",
+        "dumbbells"
+      ],
+      "searchSuffix": "sports"
+    }
+  ],
+  "responseTemplate": "Bonne question ! Voici ce que je recommande :\n\n**{PRODUCT_NAME}** — {PRODUCT_PITCH}\n\n{AFFILIATE_LINK}\n\n{DISCLOSURE}\n\nJ'espère que ça t'aide !"
+}

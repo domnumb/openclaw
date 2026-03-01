@@ -19,6 +19,7 @@ import {
 } from "./allow-list.js";
 import { formatDiscordReactionEmoji, formatDiscordUserTag } from "./format.js";
 import { resolveDiscordChannelInfo } from "./message-utils.js";
+import { opsPost } from "./ops-reporter.js";
 import { setPresence } from "./presence-cache.js";
 
 type LoadedConfig = ReturnType<typeof import("../../config/config.js").loadConfig>;
@@ -90,6 +91,10 @@ export class DiscordMessageListener extends MessageCreateListener {
       .catch((err) => {
         const logger = this.logger ?? discordEventQueueLog;
         logger.error(danger(`discord handler failed: ${String(err)}`));
+        opsPost(`Discord listener handler failed: ${String(err)}`, {
+          listener: this.constructor.name,
+          event: this.type,
+        });
       })
       .finally(() => {
         logSlowDiscordListener({

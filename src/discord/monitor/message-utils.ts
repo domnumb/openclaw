@@ -1,6 +1,9 @@
 import type { ChannelType, Client, Message } from "@buape/carbon";
 import type { APIAttachment } from "discord-api-types/v10";
 import { logVerbose } from "../../globals.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
+
+const mediaLog = createSubsystemLogger("discord/media");
 import { fetchRemoteMedia } from "../../media/fetch.js";
 import { saveMediaBuffer } from "../../media/store.js";
 
@@ -122,7 +125,10 @@ export async function resolveMediaList(
       });
     } catch (err) {
       const id = attachment.id ?? attachment.url;
-      logVerbose(`discord: failed to download attachment ${id}: ${String(err)}`);
+      mediaLog.warn(`discord: failed to download attachment ${id}: ${String(err)}`, {
+        attachmentId: id,
+        messageId: message.id,
+      });
     }
   }
   return out;

@@ -10,6 +10,7 @@ import { danger } from "../../globals.js";
 import { preflightDiscordMessage } from "./message-handler.preflight.js";
 import { processDiscordMessage } from "./message-handler.process.js";
 import { resolveDiscordMessageText } from "./message-utils.js";
+import { opsPost } from "./ops-reporter.js";
 
 type DiscordMessageHandlerParams = Omit<
   DiscordMessagePreflightParams,
@@ -115,6 +116,9 @@ export function createDiscordMessageHandler(
     },
     onError: (err) => {
       params.runtime.error?.(danger(`discord debounce flush failed: ${String(err)}`));
+      opsPost(`Discord debounce flush failed: ${String(err)}`, {
+        accountId: params.accountId,
+      });
     },
   });
 

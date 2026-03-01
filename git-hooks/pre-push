@@ -1,0 +1,20 @@
+#!/bin/sh
+# L3 — Pre-push gate: block push if build or tests fail
+# Part of CI architecture (see workspace/drafts/CONSIGNE-ci-architecture.md)
+
+set -e
+
+echo "[pre-push] Running build gate..."
+if ! pnpm build > /dev/null 2>&1; then
+  echo "❌ [pre-push] BUILD FAILED — push blocked. Run 'pnpm build' to see errors."
+  exit 1
+fi
+
+echo "[pre-push] Running test gate..."
+if ! pnpm test:fast > /dev/null 2>&1; then
+  echo "❌ [pre-push] TESTS FAILED — push blocked. Run 'pnpm test:fast' to see failures."
+  exit 1
+fi
+
+echo "✓ [pre-push] Build + tests passed."
+exit 0
