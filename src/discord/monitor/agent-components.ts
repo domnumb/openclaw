@@ -695,7 +695,7 @@ async function dispatchDiscordComponentEvent(params: {
   const fromLabel = interactionCtx.isDirectMessage
     ? buildDirectLabel(interactionCtx.user)
     : buildGuildLabel({
-        guild: (interaction.guild as any) ?? undefined,
+        guild: (interaction.guild as unknown) ?? undefined,
         channelName: channelCtx.channelName ?? interactionCtx.channelId,
         channelId: interactionCtx.channelId,
       });
@@ -862,7 +862,10 @@ async function handleDiscordComponentEvent(params: {
   label: string;
 }): Promise<void> {
   const customId =
-    (params.interaction as any).customId ?? (params.interaction as any).rawData?.custom_id ?? "";
+    (params.interaction as unknown as { customId?: string; rawData?: { custom_id?: string } })
+      .customId ??
+    (params.interaction as unknown as { rawData?: { custom_id?: string } }).rawData?.custom_id ??
+    "";
   const parsed = parseDiscordComponentData(params.data, customId);
   if (!parsed) {
     logError(`${params.label}: failed to parse component data`);
@@ -982,7 +985,10 @@ async function handleDiscordModalTrigger(params: {
   label: string;
 }): Promise<void> {
   const customId =
-    (params.interaction as any).customId ?? (params.interaction as any).rawData?.custom_id ?? "";
+    (params.interaction as unknown as { customId?: string; rawData?: { custom_id?: string } })
+      .customId ??
+    (params.interaction as unknown as { rawData?: { custom_id?: string } }).rawData?.custom_id ??
+    "";
   const parsed = parseDiscordComponentData(params.data, customId);
   if (!parsed) {
     logError(`${params.label}: failed to parse modal trigger data`);
@@ -1283,7 +1289,11 @@ class DiscordComponentButton extends Button {
   }
 
   async run(interaction: ButtonInteraction, data: ComponentData): Promise<void> {
-    const customId = (interaction as any).customId ?? (interaction as any).rawData?.custom_id ?? "";
+    const customId =
+      (interaction as unknown as { customId?: string; rawData?: { custom_id?: string } })
+        .customId ??
+      (interaction as unknown as { rawData?: { custom_id?: string } }).rawData?.custom_id ??
+      "";
     const parsed = parseDiscordComponentData(data, customId);
     if (parsed?.modalId) {
       await handleDiscordModalTrigger({

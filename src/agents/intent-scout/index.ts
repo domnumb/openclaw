@@ -88,7 +88,7 @@ export async function runIntentScout(
       );
       drafts.push(draft);
     } catch (err) {
-      const msg = `Failed to generate draft for "${question.title}": ${err}`;
+      const msg = `Failed to generate draft for "${question.title}": ${String(err)}`;
       console.warn(`[IntentScout] ${msg}`);
       errors.push(msg);
     }

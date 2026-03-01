@@ -59,7 +59,7 @@ export function createInboundDebouncer<T>(params: {
     }
     try {
       await params.onFlush(buffer.items);
-    } catch (err) {
+    } catch {
       // Retry once before reporting failure.
       try {
         await params.onFlush(buffer.items);

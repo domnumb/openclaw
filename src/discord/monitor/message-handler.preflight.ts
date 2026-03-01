@@ -244,7 +244,8 @@ export async function preflightDiscordMessage(
 
   // Fresh config for bindings lookup; other routing inputs are payload-derived.
   // FIX-F02: prefer rawMember.roles (plain string IDs) over member.roles (mention objects)
-  const rawRoles = (params.data as any).rawMember?.roles;
+  const rawRoles = (params.data as unknown as { rawMember?: { roles?: unknown[] } }).rawMember
+    ?.roles;
   const memberRoleIds = Array.isArray(rawRoles)
     ? rawRoles.map((roleId: string) => String(roleId))
     : Array.isArray(params.data.member?.roles)
