@@ -166,8 +166,8 @@ export async function dispatchReplyFromConfig(params: {
     const channelId = (ctx.OriginatingChannel ?? ctx.Surface ?? ctx.Provider ?? "").toLowerCase();
     const conversationId = ctx.OriginatingTo ?? ctx.To ?? ctx.From ?? undefined;
 
-    void hookRunner
-      .runMessageReceived(
+    try {
+      const hookResult = await hookRunner.runMessageReceived(
         {
           from: ctx.From ?? "",
           content,
@@ -191,10 +191,17 @@ export async function dispatchReplyFromConfig(params: {
           accountId: ctx.AccountId,
           conversationId,
         },
-      )
-      .catch((err) => {
-        logVerbose(`dispatch-from-config: message_received hook failed: ${String(err)}`);
-      });
+      );
+      if (hookResult?.handled) {
+        logVerbose(
+          "dispatch-from-config: message_received hook returned handled=true, skipping LLM",
+        );
+        recordProcessed("skipped", { reason: "hook_handled" });
+        return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
+      }
+    } catch (err) {
+      logVerbose(`dispatch-from-config: message_received hook failed: ${String(err)}`);
+    }
   }
 
   // Check if we should route replies to originating channel instead of dispatcher.

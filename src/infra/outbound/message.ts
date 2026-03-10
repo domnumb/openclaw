@@ -3,6 +3,7 @@ import type { PollInput } from "../../polls.js";
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway, randomIdempotencyKey } from "../../gateway/call.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { normalizePollInput } from "../../polls.js";
 import {
   GATEWAY_CLIENT_MODES,
@@ -211,26 +212,87 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
   }
 
   const gateway = resolveGatewayOptions(params.gateway);
-  const result = await callGateway<{ messageId: string }>({
-    url: gateway.url,
-    token: gateway.token,
-    method: "send",
-    params: {
-      to: params.to,
-      message: params.content,
-      mediaUrl: params.mediaUrl,
-      mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : params.mediaUrls,
-      gifPlayback: params.gifPlayback,
-      accountId: params.accountId,
-      channel,
-      sessionKey: params.mirror?.sessionKey,
-      idempotencyKey: params.idempotencyKey ?? randomIdempotencyKey(),
-    },
-    timeoutMs: gateway.timeoutMs,
-    clientName: gateway.clientName,
-    clientDisplayName: gateway.clientDisplayName,
-    mode: gateway.mode,
-  });
+
+  // Fire message_sending hook (allows plugins to modify/cancel) — same as direct path
+  const hookRunner = getGlobalHookRunner();
+  let effectiveContent = params.content;
+  if (hookRunner?.hasHooks("message_sending")) {
+    try {
+      const sendingResult = await hookRunner.runMessageSending(
+        {
+          to: params.to,
+          content: effectiveContent,
+          metadata: { channel, accountId: params.accountId, mediaUrls: mirrorMediaUrls },
+        },
+        {
+          channelId: channel,
+          accountId: params.accountId ?? undefined,
+        },
+      );
+      if (sendingResult?.cancel) {
+        return {
+          channel,
+          to: params.to,
+          via: "gateway",
+          mediaUrl: primaryMediaUrl,
+          mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : undefined,
+        };
+      }
+      if (sendingResult?.content != null) {
+        effectiveContent = sendingResult.content;
+      }
+    } catch {
+      // Don't block delivery on hook failure
+    }
+  }
+
+  let result: { messageId: string };
+  let sendSuccess = false;
+  let sendError: string | undefined;
+  try {
+    result = await callGateway<{ messageId: string }>({
+      url: gateway.url,
+      token: gateway.token,
+      method: "send",
+      params: {
+        to: params.to,
+        message: effectiveContent,
+        mediaUrl: params.mediaUrl,
+        mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : params.mediaUrls,
+        gifPlayback: params.gifPlayback,
+        accountId: params.accountId,
+        channel,
+        sessionKey: params.mirror?.sessionKey,
+        idempotencyKey: params.idempotencyKey ?? randomIdempotencyKey(),
+      },
+      timeoutMs: gateway.timeoutMs,
+      clientName: gateway.clientName,
+      clientDisplayName: gateway.clientDisplayName,
+      mode: gateway.mode,
+    });
+    sendSuccess = true;
+  } catch (err) {
+    sendError = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
+    // Fire message_sent hook (observability, fire-and-forget)
+    if (hookRunner?.hasHooks("message_sent")) {
+      void hookRunner
+        .runMessageSent(
+          {
+            to: params.to,
+            content: effectiveContent,
+            success: sendSuccess,
+            ...(sendError ? { error: sendError } : {}),
+          },
+          {
+            channelId: channel,
+            accountId: params.accountId ?? undefined,
+          },
+        )
+        .catch(() => {});
+    }
+  }
 
   return {
     channel,

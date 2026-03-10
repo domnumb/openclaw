@@ -45,6 +45,14 @@ async function assertLocalMediaAllowed(
     return;
   }
   const roots = localRoots ?? getDefaultLocalRoots();
+
+  // FIX-112: Check file existence first for a clear error message
+  try {
+    await fs.access(mediaPath);
+  } catch {
+    throw new Error(`Local media file does not exist: ${mediaPath}`);
+  }
+
   // Resolve symlinks so a symlink under /tmp pointing to /etc/passwd is caught.
   let resolved: string;
   try {
