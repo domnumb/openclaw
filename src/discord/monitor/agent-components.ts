@@ -15,6 +15,7 @@ import {
   type RoleSelectMenuInteraction,
   type StringSelectMenuInteraction,
   type UserSelectMenuInteraction,
+  type Guild,
 } from "@buape/carbon";
 import { ButtonStyle, ChannelType } from "discord-api-types/v10";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -695,7 +696,7 @@ async function dispatchDiscordComponentEvent(params: {
   const fromLabel = interactionCtx.isDirectMessage
     ? buildDirectLabel(interactionCtx.user)
     : buildGuildLabel({
-        guild: (interaction.guild as unknown) ?? undefined,
+        guild: (interaction.guild as unknown as Guild | undefined) ?? undefined,
         channelName: channelCtx.channelName ?? interactionCtx.channelId,
         channelId: interactionCtx.channelId,
       });

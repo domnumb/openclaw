@@ -247,9 +247,9 @@ export async function preflightDiscordMessage(
   const rawRoles = (params.data as unknown as { rawMember?: { roles?: unknown[] } }).rawMember
     ?.roles;
   const memberRoleIds = Array.isArray(rawRoles)
-    ? rawRoles.map((roleId: string) => String(roleId))
+    ? rawRoles.map((roleId: unknown) => String(roleId))
     : Array.isArray(params.data.member?.roles)
-      ? params.data.member.roles.map((roleId: string) => String(roleId))
+      ? params.data.member.roles.map((roleId: unknown) => String(roleId))
       : [];
   const route = resolveAgentRoute({
     cfg: loadConfig(),
