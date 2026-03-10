@@ -6,6 +6,14 @@ import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
 } from "../../agents/agent-scope.js";
+import { resolveAuthProfileOrder } from "../../agents/auth-profiles/order.js";
+import { ensureAuthProfileStore } from "../../agents/auth-profiles/store.js";
+import {
+  isProfileInCooldown,
+  resolveProfileUnusableUntilForDisplay,
+} from "../../agents/auth-profiles/usage.js";
+import { DEFAULT_PROVIDER } from "../../agents/defaults.js";
+import { parseModelRef } from "../../agents/model-selection.js";
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -40,6 +48,7 @@ import {
   validateAgentsFilesSetParams,
   validateAgentsListParams,
   validateAgentsUpdateParams,
+  validateAgentRoutingStatusParams,
 } from "../protocol/index.js";
 import { listAgentsForGateway } from "../session-utils.js";
 
@@ -509,6 +518,108 @@ export const agentsHandlers: GatewayRequestHandlers = {
           updatedAtMs: meta?.updatedAtMs,
           content,
         },
+      },
+      undefined,
+    );
+  },
+  "agent.routing.status": ({ params, respond }) => {
+    if (!validateAgentRoutingStatusParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid agent.routing.status params: ${formatValidationErrors(
+            validateAgentRoutingStatusParams.errors,
+          )}`,
+        ),
+      );
+      return;
+    }
+
+    const cfg = loadConfig();
+    const agentId = resolveAgentIdOrError(String(params.agentId ?? ""), cfg);
+    if (!agentId) {
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown agent id"));
+      return;
+    }
+
+    const agentDir = resolveAgentDir(cfg, agentId);
+
+    // Resolve primary model and provider from config
+    const agentEntries = listAgentEntries(cfg);
+    const agentIdx = findAgentEntryIndex(agentEntries, agentId);
+    const agentEntry = agentIdx >= 0 ? agentEntries[agentIdx] : null;
+    const defaultProvider = DEFAULT_PROVIDER;
+    const modelConfig = agentEntry?.model ?? cfg.agents?.defaults?.model;
+
+    // Extract primary model ref
+    const primaryRaw =
+      typeof modelConfig === "string"
+        ? modelConfig
+        : typeof modelConfig === "object" && modelConfig
+          ? String(
+              (modelConfig as Record<string, unknown>).primary ??
+                (modelConfig as Record<string, unknown>).model ??
+                "",
+            )
+          : "";
+    const primaryRef = parseModelRef(primaryRaw, defaultProvider);
+    const provider = primaryRef?.provider ?? defaultProvider;
+    const primaryModel = primaryRef?.model ?? primaryRaw;
+
+    // Load auth profile store and resolve ordered chain for this provider
+    const store = ensureAuthProfileStore(agentDir);
+    const orderedProfiles = resolveAuthProfileOrder({ cfg, store, provider });
+
+    const now = Date.now();
+    const chain = orderedProfiles.map((profileId) => {
+      const inCooldown = isProfileInCooldown(store, profileId);
+      const unusableUntil = resolveProfileUnusableUntilForDisplay(store, profileId);
+      const stats = store.usageStats?.[profileId];
+      const disabledUntil = stats?.disabledUntil;
+      const isDisabled =
+        typeof disabledUntil === "number" && Number.isFinite(disabledUntil) && now < disabledUntil;
+
+      const status: "active" | "cooldown" | "disabled" = isDisabled
+        ? "disabled"
+        : inCooldown
+          ? "cooldown"
+          : "active";
+
+      const cooldownRemainingMs =
+        inCooldown && unusableUntil ? Math.max(0, unusableUntil - now) : undefined;
+
+      const cooldownUntil = stats?.cooldownUntil;
+      const cooldownMaxMs =
+        cooldownUntil && cooldownUntil > now
+          ? Math.max(0, cooldownUntil - (stats?.lastFailureAt ?? now - cooldownUntil))
+          : undefined;
+
+      return {
+        profileId,
+        provider,
+        model: primaryModel,
+        status,
+        ...(cooldownRemainingMs !== undefined ? { cooldownRemainingMs } : {}),
+        ...(cooldownMaxMs !== undefined ? { cooldownMaxMs } : {}),
+      };
+    });
+
+    // "Serving now" = first active profile in chain; fallback to first if all are in cooldown
+    const servingProfile = chain.find((entry) => entry.status === "active") ?? chain[0];
+    const defaultRoute = { provider, model: primaryModel };
+    const servingNow = servingProfile
+      ? { provider: servingProfile.provider, model: servingProfile.model }
+      : defaultRoute;
+
+    respond(
+      true,
+      {
+        defaultRoute,
+        servingNow,
+        chain,
+        fallbackCount: Math.max(0, chain.length - 1),
       },
       undefined,
     );

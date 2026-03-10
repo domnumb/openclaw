@@ -2104,3 +2104,59 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Model Routing panel */
+.routing-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.routing-chain-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.routing-chain-arrow {
+  color: var(--text-muted);
+  font-size: 14px;
+  user-select: none;
+}
+
+.routing-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.routing-pill--active {
+  border-color: var(--success, #4caf50);
+  background: color-mix(in srgb, var(--success, #4caf50) 8%, transparent);
+}
+
+.routing-pill--cooldown {
+  border-color: var(--warn, #ff9800);
+  background: color-mix(in srgb, var(--warn, #ff9800) 8%, transparent);
+}
+
+.routing-pill--disabled {
+  border-color: var(--danger, #f44336);
+  background: color-mix(in srgb, var(--danger, #f44336) 8%, transparent);
+  opacity: 0.7;
+}
+
+.routing-pill-id {
+  font-weight: 500;
+}
+
+.routing-pill-status {
+  color: var(--text-muted);
+  font-size: 11px;
+}

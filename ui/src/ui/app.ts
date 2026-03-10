@@ -203,8 +203,14 @@ export class OpenClawApp extends LitElement {
   @state() agentsList: AgentsListResult | null = null;
   @state() agentsError: string | null = null;
   @state() agentsSelectedId: string | null = null;
-  @state() agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron" =
-    "overview";
+  @state() agentsPanel:
+    | "overview"
+    | "files"
+    | "tools"
+    | "skills"
+    | "channels"
+    | "cron"
+    | "routing" = "overview";
   @state() agentFilesLoading = false;
   @state() agentFilesError: string | null = null;
   @state() agentFilesList: AgentsFilesListResult | null = null;
@@ -219,6 +225,12 @@ export class OpenClawApp extends LitElement {
   @state() agentSkillsError: string | null = null;
   @state() agentSkillsReport: SkillStatusReport | null = null;
   @state() agentSkillsAgentId: string | null = null;
+  @state() agentRoutingLoading = false;
+  @state() agentRoutingError: string | null = null;
+  @state() agentRoutingData:
+    | import("./controllers/agent-routing.ts").AgentRoutingStatusResult
+    | null = null;
+  @state() agentRoutingAgentId: string | null = null;
 
   @state() sessionsLoading = false;
   @state() sessionsResult: SessionsListResult | null = null;

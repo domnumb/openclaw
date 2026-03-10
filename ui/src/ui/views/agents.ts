@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import type { AgentRoutingStatusResult } from "../controllers/agent-routing.ts";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
@@ -8,6 +9,7 @@ import type {
   CronStatus,
   SkillStatusReport,
 } from "../types.ts";
+import { renderAgentRouting } from "./agents-panels-routing.ts";
 import {
   renderAgentFiles,
   renderAgentChannels,
@@ -28,7 +30,14 @@ import {
   resolveModelPrimary,
 } from "./agents-utils.ts";
 
-export type AgentsPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
+export type AgentsPanel =
+  | "overview"
+  | "files"
+  | "tools"
+  | "skills"
+  | "channels"
+  | "cron"
+  | "routing";
 
 export type AgentsProps = {
   loading: boolean;
@@ -63,6 +72,9 @@ export type AgentsProps = {
   agentSkillsError: string | null;
   agentSkillsAgentId: string | null;
   skillsFilter: string;
+  agentRoutingLoading: boolean;
+  agentRoutingError: string | null;
+  agentRoutingData: AgentRoutingStatusResult | null;
   onRefresh: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectPanel: (panel: AgentsPanel) => void;
@@ -84,6 +96,7 @@ export type AgentsProps = {
   onAgentSkillToggle: (agentId: string, skillName: string, enabled: boolean) => void;
   onAgentSkillsClear: (agentId: string) => void;
   onAgentSkillsDisableAll: (agentId: string) => void;
+  onRoutingRefresh: () => void;
 };
 
 export type AgentContext = {
@@ -278,6 +291,17 @@ export function renderAgents(props: AgentsProps) {
                       })
                     : nothing
                 }
+                ${
+                  props.activePanel === "routing"
+                    ? renderAgentRouting({
+                        agentId: selectedAgent.id,
+                        loading: props.agentRoutingLoading,
+                        error: props.agentRoutingError,
+                        data: props.agentRoutingData,
+                        onRefresh: props.onRoutingRefresh,
+                      })
+                    : nothing
+                }
               `
         }
       </section>
@@ -319,6 +343,7 @@ function renderAgentTabs(active: AgentsPanel, onSelect: (panel: AgentsPanel) => 
     { id: "skills", label: "Skills" },
     { id: "channels", label: "Channels" },
     { id: "cron", label: "Cron Jobs" },
+    { id: "routing", label: "Routing" },
   ];
   return html`
     <div class="agent-tabs">

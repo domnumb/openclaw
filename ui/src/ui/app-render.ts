@@ -6,6 +6,7 @@ import { renderUsageTab } from "./app-render-usage-tab.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
+import { loadAgentRouting } from "./controllers/agent-routing.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
@@ -390,12 +391,18 @@ export function renderApp(state: AppViewState) {
                   state.agentSkillsReport = null;
                   state.agentSkillsError = null;
                   state.agentSkillsAgentId = null;
+                  state.agentRoutingData = null;
+                  state.agentRoutingError = null;
+                  state.agentRoutingAgentId = null;
                   void loadAgentIdentity(state, agentId);
                   if (state.agentsPanel === "files") {
                     void loadAgentFiles(state, agentId);
                   }
                   if (state.agentsPanel === "skills") {
                     void loadAgentSkills(state, agentId);
+                  }
+                  if (state.agentsPanel === "routing") {
+                    void loadAgentRouting(state, agentId);
                   }
                 },
                 onSelectPanel: (panel) => {
@@ -420,6 +427,11 @@ export function renderApp(state: AppViewState) {
                   }
                   if (panel === "cron") {
                     void state.loadCron();
+                  }
+                  if (panel === "routing") {
+                    if (resolvedAgentId) {
+                      void loadAgentRouting(state, resolvedAgentId);
+                    }
                   }
                 },
                 onLoadFiles: (agentId) => loadAgentFiles(state, agentId),
@@ -675,6 +687,14 @@ export function renderApp(state: AppViewState) {
                     ? { primary, fallbacks: normalized }
                     : { fallbacks: normalized };
                   updateConfigFormValue(state, basePath, next);
+                },
+                agentRoutingLoading: state.agentRoutingLoading,
+                agentRoutingError: state.agentRoutingError,
+                agentRoutingData: state.agentRoutingData,
+                onRoutingRefresh: () => {
+                  if (resolvedAgentId) {
+                    void loadAgentRouting(state, resolvedAgentId);
+                  }
                 },
               })
             : nothing

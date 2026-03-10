@@ -1,5 +1,6 @@
 import type { EventLogEntry } from "./app-events.ts";
 import type { CompactionStatus } from "./app-tool-stream.ts";
+import type { AgentRoutingStatusResult } from "./controllers/agent-routing.ts";
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
@@ -127,7 +128,7 @@ export type AppViewState = {
   agentsList: AgentsListResult | null;
   agentsError: string | null;
   agentsSelectedId: string | null;
-  agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron";
+  agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron" | "routing";
   agentFilesLoading: boolean;
   agentFilesError: string | null;
   agentFilesList: AgentsFilesListResult | null;
@@ -142,6 +143,10 @@ export type AppViewState = {
   agentSkillsError: string | null;
   agentSkillsReport: SkillStatusReport | null;
   agentSkillsAgentId: string | null;
+  agentRoutingLoading: boolean;
+  agentRoutingError: string | null;
+  agentRoutingData: AgentRoutingStatusResult | null;
+  agentRoutingAgentId: string | null;
   sessionsLoading: boolean;
   sessionsResult: SessionsListResult | null;
   sessionsError: string | null;

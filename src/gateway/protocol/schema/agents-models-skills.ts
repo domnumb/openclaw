@@ -207,3 +207,40 @@ export const SkillsUpdateParamsSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const AgentRoutingStatusParamsSchema = Type.Object(
+  { agentId: NonEmptyString },
+  { additionalProperties: false },
+);
+
+export const AgentRoutingChainItemSchema = Type.Object(
+  {
+    profileId: NonEmptyString,
+    provider: NonEmptyString,
+    model: NonEmptyString,
+    status: Type.Union([
+      Type.Literal("active"),
+      Type.Literal("cooldown"),
+      Type.Literal("disabled"),
+    ]),
+    cooldownRemainingMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    cooldownMaxMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false },
+);
+
+export const AgentRoutingStatusResultSchema = Type.Object(
+  {
+    defaultRoute: Type.Object(
+      { provider: NonEmptyString, model: NonEmptyString },
+      { additionalProperties: false },
+    ),
+    servingNow: Type.Object(
+      { provider: NonEmptyString, model: NonEmptyString },
+      { additionalProperties: false },
+    ),
+    chain: Type.Array(AgentRoutingChainItemSchema),
+    fallbackCount: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
