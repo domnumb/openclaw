@@ -35,6 +35,16 @@ export type SubscribeEmbeddedPiSessionParams = {
   enforceFinalTag?: boolean;
   config?: OpenClawConfig;
   sessionKey?: string;
+  /** Session manager for per-turn context injection (appends messages visible on NEXT turn). */
+  sessionManager?: {
+    appendMessage: (msg: { role: string; content: unknown }) => void;
+  };
+  /** Hook agent context for per-turn before_prompt_build calls. */
+  hookAgentContext?: {
+    agentId?: string;
+    workspaceDir?: string;
+    messageProvider?: string;
+  };
 };
 
 export type { BlockReplyChunking } from "./pi-embedded-block-chunker.js";

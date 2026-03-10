@@ -726,6 +726,17 @@ export async function runEmbeddedAttempt(
         });
       };
 
+      // Session manager adapter for per-turn context injection.
+      // appendMessage pushes a message into the live session; the current LLM turn
+      // is already streaming and won't see it, but the NEXT turn will (one-turn delay).
+      const subscribeSessionManager = {
+        appendMessage: (msg: { role: string; content: unknown }) => {
+          const messages = activeSession.messages.slice();
+          messages.push(msg as (typeof messages)[number]);
+          activeSession.agent.replaceMessages(messages);
+        },
+      };
+
       const subscription = subscribeEmbeddedPiSession({
         session: activeSession,
         runId: params.runId,
@@ -747,6 +758,15 @@ export async function runEmbeddedAttempt(
         enforceFinalTag: params.enforceFinalTag,
         config: params.config,
         sessionKey: params.sessionKey ?? params.sessionId,
+        sessionManager: subscribeSessionManager,
+        hookAgentContext: {
+          agentId:
+            typeof params.agentId === "string" && params.agentId.trim()
+              ? params.agentId
+              : undefined,
+          workspaceDir: params.workspaceDir,
+          messageProvider: params.messageProvider ?? undefined,
+        },
       });
 
       const {
@@ -871,6 +891,33 @@ export async function runEmbeddedAttempt(
             }
           } catch (hookErr) {
             log.warn(`before_agent_start hook failed: ${String(hookErr)}`);
+          }
+        }
+
+        // Run before_prompt_build hooks — per-turn context injection (successor to before_agent_start)
+        if (hookRunner?.hasHooks("before_prompt_build")) {
+          try {
+            const promptBuildResult = await hookRunner.runBeforePromptBuild(
+              {
+                prompt: effectivePrompt,
+                messages: activeSession.messages,
+              },
+              {
+                agentId: hookAgentId,
+                sessionKey: params.sessionKey,
+                sessionId: params.sessionId,
+                workspaceDir: params.workspaceDir,
+                messageProvider: params.messageProvider ?? undefined,
+              },
+            );
+            if (promptBuildResult?.prependContext) {
+              effectivePrompt = `${promptBuildResult.prependContext}\n\n${effectivePrompt}`;
+              log.debug(
+                `hooks: before_prompt_build prepended context (${promptBuildResult.prependContext.length} chars)`,
+              );
+            }
+          } catch (hookErr) {
+            log.warn(`before_prompt_build hook failed: ${String(hookErr)}`);
           }
         }
 

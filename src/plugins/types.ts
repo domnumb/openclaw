@@ -310,7 +310,9 @@ export type PluginHookName =
   | "session_start"
   | "session_end"
   | "gateway_start"
-  | "gateway_stop";
+  | "gateway_stop"
+  | "before_prompt_build"
+  | "llm_output";
 
 // Agent context shared across agent hooks
 export type PluginHookAgentContext = {
@@ -384,6 +386,10 @@ export type PluginHookMessageReceivedEvent = {
   content: string;
   timestamp?: number;
   metadata?: Record<string, unknown>;
+};
+
+export type PluginHookMessageReceivedResult = {
+  handled?: boolean;
 };
 
 // message_sending hook
@@ -492,6 +498,29 @@ export type PluginHookGatewayStopEvent = {
   reason?: string;
 };
 
+// before_prompt_build hook — fires before each agent turn's prompt is sent to the LLM.
+// Plugins can inject context via prependContext (prepended to the user prompt).
+export type PluginHookBeforePromptBuildEvent = {
+  prompt: string;
+  messages?: unknown[];
+  /** Current message count — allows handlers to distinguish first turn from subsequent turns. */
+  messageCount?: number;
+  /** Turn index within the current agent run (0 = first turn). */
+  turnIndex?: number;
+};
+
+export type PluginHookBeforePromptBuildResult = {
+  prependContext?: string;
+};
+
+// llm_output hook — fires after a complete LLM response is received.
+// Plugins can scan for confabulation or log token usage.
+export type PluginHookLlmOutputEvent = {
+  text: string;
+  thinking?: string;
+  usage?: unknown;
+};
+
 // Hook handler types mapped by hook name
 export type PluginHookHandlerMap = {
   before_agent_start: (
@@ -514,7 +543,7 @@ export type PluginHookHandlerMap = {
   message_received: (
     event: PluginHookMessageReceivedEvent,
     ctx: PluginHookMessageContext,
-  ) => Promise<void> | void;
+  ) => Promise<PluginHookMessageReceivedResult | void> | PluginHookMessageReceivedResult | void;
   message_sending: (
     event: PluginHookMessageSendingEvent,
     ctx: PluginHookMessageContext,
@@ -550,6 +579,14 @@ export type PluginHookHandlerMap = {
   gateway_stop: (
     event: PluginHookGatewayStopEvent,
     ctx: PluginHookGatewayContext,
+  ) => Promise<void> | void;
+  before_prompt_build: (
+    event: PluginHookBeforePromptBuildEvent,
+    ctx: PluginHookAgentContext,
+  ) => Promise<PluginHookBeforePromptBuildResult | void> | PluginHookBeforePromptBuildResult | void;
+  llm_output: (
+    event: PluginHookLlmOutputEvent,
+    ctx: PluginHookAgentContext,
   ) => Promise<void> | void;
 };
 

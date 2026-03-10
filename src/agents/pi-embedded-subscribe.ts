@@ -594,6 +594,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     blockChunking,
     blockChunker,
     hookRunner: params.hookRunner,
+    sessionManager: params.sessionManager,
     noteLastAssistant,
     shouldEmitToolResult,
     shouldEmitToolOutput,

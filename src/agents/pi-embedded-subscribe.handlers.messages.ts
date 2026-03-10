@@ -55,13 +55,67 @@ export function handleMessageStart(
   }
 
   // KNOWN: Resetting at `text_end` is unsafe (late/duplicate end events).
-  // ASSUME: `message_start` is the only reliable boundary for “new assistant message begins”.
+  // ASSUME: `message_start` is the only reliable boundary for "new assistant message begins".
   // Start-of-message is a safer reset point than message_end: some providers
   // may deliver late text_end updates after message_end, which would otherwise
   // re-trigger block replies.
   ctx.resetAssistantMessageState(ctx.state.assistantTexts.length);
   // Use assistant message_start as the earliest "writing" signal for typing.
   void ctx.params.onAssistantMessageStart?.();
+
+  // Per-turn before_prompt_build: fire on turn > 0 (turn 0 handled in attempt.ts).
+  // Fire-and-forget: does not block the response stream.
+  // Injected context visible on turn N+1 (one-turn delay).
+  firePerTurnBeforePromptBuild(ctx);
+}
+
+function firePerTurnBeforePromptBuild(ctx: EmbeddedPiSubscribeContext): void {
+  const turnIndex = ctx.state.assistantMessageIndex;
+  if (turnIndex <= 1) {
+    return;
+  }
+  if (!ctx.hookRunner?.hasHooks("before_prompt_build")) {
+    return;
+  }
+  if (!ctx.sessionManager) {
+    return;
+  }
+
+  const hookCtx = ctx.params.hookAgentContext;
+  void (async () => {
+    try {
+      const result = await ctx.hookRunner!.runBeforePromptBuild(
+        {
+          prompt: "",
+          messages: ctx.params.session.messages,
+          messageCount: ctx.params.session.messages.length,
+          turnIndex,
+        },
+        {
+          agentId: hookCtx?.agentId,
+          sessionKey: ctx.params.sessionKey,
+          sessionId: (ctx.params.session as { id?: string }).id,
+          workspaceDir: hookCtx?.workspaceDir,
+          messageProvider: hookCtx?.messageProvider,
+        },
+      );
+      if (result?.prependContext) {
+        ctx.sessionManager!.appendMessage({
+          role: "user",
+          content: [{ type: "text", text: "[system context]\n" + result.prependContext }],
+        });
+        ctx.log.debug(
+          "before_prompt_build per-turn injected context (" +
+            result.prependContext.length +
+            " chars, turn=" +
+            turnIndex +
+            ")",
+        );
+      }
+    } catch (err) {
+      ctx.log.warn("before_prompt_build per-turn hook failed: " + String(err));
+    }
+  })();
 }
 
 export function handleMessageUpdate(
@@ -381,6 +435,23 @@ export function handleMessageEnd(
         });
       }
     }
+  }
+
+  // Fire llm_output hook (fire-and-forget) for confabulation scanning / token logging
+  if (ctx.hookRunner?.hasHooks("llm_output")) {
+    void ctx.hookRunner
+      .runLlmOutput(
+        {
+          text: rawText,
+          thinking: rawThinking || undefined,
+          usage: (assistantMessage as { usage?: unknown }).usage,
+        },
+        {
+          sessionKey: ctx.params.sessionKey,
+          sessionId: (ctx.params.session as { id?: string }).id,
+        },
+      )
+      .catch(() => {});
   }
 
   ctx.state.deltaBuffer = "";

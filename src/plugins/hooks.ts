@@ -14,14 +14,18 @@ import type {
   PluginHookBeforeAgentStartEvent,
   PluginHookBeforeAgentStartResult,
   PluginHookBeforeCompactionEvent,
+  PluginHookBeforePromptBuildEvent,
+  PluginHookBeforePromptBuildResult,
   PluginHookBeforeResetEvent,
   PluginHookBeforeToolCallEvent,
   PluginHookBeforeToolCallResult,
   PluginHookGatewayContext,
   PluginHookGatewayStartEvent,
   PluginHookGatewayStopEvent,
+  PluginHookLlmOutputEvent,
   PluginHookMessageContext,
   PluginHookMessageReceivedEvent,
+  PluginHookMessageReceivedResult,
   PluginHookMessageSendingEvent,
   PluginHookMessageSendingResult,
   PluginHookMessageSentEvent,
@@ -43,8 +47,11 @@ export type {
   PluginHookBeforeAgentStartResult,
   PluginHookAgentEndEvent,
   PluginHookBeforeCompactionEvent,
+  PluginHookBeforePromptBuildEvent,
+  PluginHookBeforePromptBuildResult,
   PluginHookBeforeResetEvent,
   PluginHookAfterCompactionEvent,
+  PluginHookLlmOutputEvent,
   PluginHookMessageContext,
   PluginHookMessageReceivedEvent,
   PluginHookMessageSendingEvent,
@@ -201,6 +208,28 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
   }
 
   /**
+   * Run before_prompt_build hook.
+   * Fires before each agent turn to allow plugins to inject per-turn context.
+   * Runs sequentially, merging prependContext from all handlers.
+   */
+  async function runBeforePromptBuild(
+    event: PluginHookBeforePromptBuildEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<PluginHookBeforePromptBuildResult | undefined> {
+    return runModifyingHook<"before_prompt_build", PluginHookBeforePromptBuildResult>(
+      "before_prompt_build",
+      event,
+      ctx,
+      (acc, next) => ({
+        prependContext:
+          acc?.prependContext && next.prependContext
+            ? `${acc.prependContext}\n\n${next.prependContext}`
+            : (next.prependContext ?? acc?.prependContext),
+      }),
+    );
+  }
+
+  /**
    * Run agent_end hook.
    * Allows plugins to analyze completed conversations.
    * Runs in parallel (fire-and-forget).
@@ -210,6 +239,19 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
     ctx: PluginHookAgentContext,
   ): Promise<void> {
     return runVoidHook("agent_end", event, ctx);
+  }
+
+  /**
+   * Run llm_output hook.
+   * Fires after a complete LLM response is received.
+   * Allows plugins to scan for confabulation or log token usage.
+   * Runs in parallel (fire-and-forget).
+   */
+  async function runLlmOutput(
+    event: PluginHookLlmOutputEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<void> {
+    return runVoidHook("llm_output", event, ctx);
   }
 
   /**
@@ -250,13 +292,21 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
 
   /**
    * Run message_received hook.
-   * Runs in parallel (fire-and-forget).
+   * Runs sequentially. If any handler returns { handled: true }, the message
+   * should be considered fully handled and NOT forwarded to the LLM session.
    */
   async function runMessageReceived(
     event: PluginHookMessageReceivedEvent,
     ctx: PluginHookMessageContext,
-  ): Promise<void> {
-    return runVoidHook("message_received", event, ctx);
+  ): Promise<PluginHookMessageReceivedResult | undefined> {
+    return runModifyingHook<"message_received", PluginHookMessageReceivedResult>(
+      "message_received",
+      event,
+      ctx,
+      (acc, next) => ({
+        handled: acc?.handled || next?.handled,
+      }),
+    );
   }
 
   /**
@@ -458,7 +508,9 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
   return {
     // Agent hooks
     runBeforeAgentStart,
+    runBeforePromptBuild,
     runAgentEnd,
+    runLlmOutput,
     runBeforeCompaction,
     runAfterCompaction,
     runBeforeReset,

@@ -82,6 +82,9 @@ export type EmbeddedPiSubscribeContext = {
   blockChunking?: BlockReplyChunking;
   blockChunker: EmbeddedBlockChunker | null;
   hookRunner?: HookRunner;
+  sessionManager?: {
+    appendMessage: (msg: { role: string; content: unknown }) => void;
+  };
   noteLastAssistant: (msg: AgentMessage) => void;
 
   shouldEmitToolResult: () => boolean;
