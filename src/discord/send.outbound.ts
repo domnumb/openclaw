@@ -90,6 +90,12 @@ export async function sendMessageDiscord(
   });
   const chunkMode = resolveChunkMode(cfg, "discord", accountInfo.accountId);
   const textWithTables = convertMarkdownTables(text ?? "", tableMode);
+
+  // Guard: skip send if text is empty after markdown conversion (prevents blank Discord messages)
+  if (!textWithTables.trim() && !opts.mediaUrl) {
+    return { messageId: "", channelId: "" };
+  }
+
   const { token, rest, request } = createDiscordClient(opts, cfg);
   const recipient = await parseAndResolveRecipient(to, opts.accountId);
   const { channelId } = await resolveChannelId(rest, recipient, request);
