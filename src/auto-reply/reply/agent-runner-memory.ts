@@ -8,6 +8,7 @@ import type { FollowupRun } from "./queue.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import { truncateOversizedToolResultsInSession } from "../../agents/pi-embedded-runner/tool-result-truncation.js";
 import { compactEmbeddedPiSession, runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
@@ -365,9 +366,39 @@ export async function runProactiveCompactionIfNeeded(params: {
     return { compacted: false, sessionEntry: params.sessionEntry };
   }
 
+  // If the session is extremely oversized (>2x context window), compaction
+  // will hit E2BIG. The overflow handler in run.ts will reset these sessions.
+  const maxCompactableTokens = contextWindow * 2;
+  if (estimatedTokens > maxCompactableTokens) {
+    logInfo(
+      `proactive-compaction: skipped — session too large for compaction (${estimatedTokens} > ${maxCompactableTokens} est. tokens). Will be reset on next overflow.`,
+    );
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  }
+
   logInfo(
     `proactive-compaction: triggering — ${estimatedTokens} est. tokens >= ${threshold} threshold (${contextWindow} context window)`,
   );
+
+  // Pre-compact: truncate oversized tool results to avoid E2BIG when the
+  // session file is too large for the OS to pass as a subprocess argument.
+  if (sessionFile && estimatedTokens > contextWindow) {
+    try {
+      const truncResult = await truncateOversizedToolResultsInSession({
+        sessionFile,
+        contextWindowTokens: contextWindow,
+        sessionId: params.followupRun.run.sessionId,
+        sessionKey: params.sessionKey,
+      });
+      if (truncResult.truncated) {
+        logInfo(
+          `proactive-compaction: pre-truncated ${truncResult.truncatedCount} oversized tool result(s)`,
+        );
+      }
+    } catch (err) {
+      logVerbose(`proactive-compaction: pre-truncation failed — ${String(err)}`);
+    }
+  }
 
   try {
     const result = await compactEmbeddedPiSession({
