@@ -40,17 +40,21 @@ export function getDefaultLocalRoots(): readonly string[] {
 async function assertLocalMediaAllowed(
   mediaPath: string,
   localRoots: readonly string[] | "any" | undefined,
+  opts?: { skipExistenceCheck?: boolean },
 ): Promise<void> {
   if (localRoots === "any") {
     return;
   }
   const roots = localRoots ?? getDefaultLocalRoots();
 
-  // FIX-112: Check file existence first for a clear error message
-  try {
-    await fs.access(mediaPath);
-  } catch {
-    throw new Error(`Local media file does not exist: ${mediaPath}`);
+  // FIX-112: Check file existence first for a clear error message.
+  // Skip when a readFile override is provided (caller handles reading).
+  if (!opts?.skipExistenceCheck) {
+    try {
+      await fs.access(mediaPath);
+    } catch {
+      throw new Error(`Local media file does not exist: ${mediaPath}`);
+    }
   }
 
   // Resolve symlinks so a symlink under /tmp pointing to /etc/passwd is caught.
@@ -292,7 +296,9 @@ async function loadWebMediaInternal(
 
   // Guard local reads against allowed directory roots to prevent file exfiltration.
   if (!(sandboxValidated || localRoots === "any")) {
-    await assertLocalMediaAllowed(mediaUrl, localRoots);
+    await assertLocalMediaAllowed(mediaUrl, localRoots, {
+      skipExistenceCheck: !!readFileOverride,
+    });
   }
 
   // Local path

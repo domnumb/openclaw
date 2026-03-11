@@ -88,7 +88,13 @@ export async function persistSessionUsageUpdate(params: {
             outputTokens: output,
             // Only overwrite totalTokens when we have a fresh snapshot.
             // Preserve last known value otherwise (cron or previous turn may have set it).
-            ...(typeof totalTokens === "number" ? { totalTokens, totalTokensFresh: true } : {}),
+            ...(typeof totalTokens === "number"
+              ? { totalTokens, totalTokensFresh: true }
+              : // Mark stale only when totalTokensFresh wasn't previously set,
+                // to avoid clobbering a fresh value from a prior turn/cron.
+                entry.totalTokensFresh === undefined
+                ? { totalTokensFresh: false }
+                : {}),
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
             contextTokens: resolvedContextTokens,

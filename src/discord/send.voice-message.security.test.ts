@@ -19,6 +19,8 @@ describe("sendVoiceMessageDiscord - media hardening", () => {
   it("does not allow non-http URL schemes to reach ffmpeg/ffprobe", async () => {
     await expect(
       sendVoiceMessageDiscord("channel:123", "rtsp://example.com/voice.ogg"),
-    ).rejects.toThrow(/Local media path is not under an allowed directory|ENOENT|no such file/i);
+    ).rejects.toThrow(
+      /Local media path is not under an allowed directory|Local media file does not exist|ENOENT|no such file/i,
+    );
   });
 });
