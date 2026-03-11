@@ -257,7 +257,13 @@ export function createFollowupRunner(params: {
         originatingTo: queued.originatingTo,
         accountId: queued.run.agentAccountId,
       });
-      const finalPayloads = suppressMessagingToolReplies ? [] : dedupedPayloads;
+      // FIX: Same as agent-runner-payloads — don't blanket-suppress when dedup already applied.
+      if (suppressMessagingToolReplies && dedupedPayloads.length > 0) {
+        logVerbose(
+          `followup: messaging-tool sent to same channel — ${dedupedPayloads.length} payload(s) kept (dedup applied)`,
+        );
+      }
+      const finalPayloads = dedupedPayloads;
 
       if (finalPayloads.length === 0) {
         return;

@@ -103,7 +103,17 @@ export function buildReplyPayloads(params: {
             (payload) => !params.directlySentBlockKeys!.has(createBlockReplyPayloadKey(payload)),
           )
         : dedupedPayloads;
-  const replyPayloads = suppressMessagingToolReplies ? [] : filteredPayloads;
+  // FIX: Previously, suppressMessagingToolReplies blanket-dropped ALL final payloads
+  // when the agent sent via message tool to the same channel. This silently killed
+  // the conversational text reply even when its content differed from the tool message.
+  // filterMessagingToolDuplicates (above) already handles actual text duplicates.
+  // Now we only log for observability instead of suppressing.
+  if (suppressMessagingToolReplies && filteredPayloads.length > 0) {
+    logVerbose(
+      `messaging-tool sent to same channel — ${filteredPayloads.length} final payload(s) kept (dedup already applied)`,
+    );
+  }
+  const replyPayloads = filteredPayloads;
 
   return {
     replyPayloads,
