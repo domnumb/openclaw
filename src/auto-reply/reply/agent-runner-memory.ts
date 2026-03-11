@@ -8,10 +8,12 @@ import type { FollowupRun } from "./queue.js";
 import { resolveAgentModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
-import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
+import { compactEmbeddedPiSession, runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
   resolveAgentIdFromSessionKey,
+  resolveSessionFilePath,
+  resolveSessionFilePathOptions,
   type SessionEntry,
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
@@ -292,4 +294,137 @@ export async function runMemoryFlushIfNeeded(params: {
   }
 
   return activeSessionEntry;
+}
+
+// ─── Proactive compaction ────────────────────────────────────────────────────
+// When the provider (e.g. claude-max) doesn't report usage, the SDK never
+// triggers auto-compaction internally. The session grows until it overflows,
+// at which point the API returns an error and the overflow handler reacts.
+// Proactive compaction prevents this by estimating tokens from file size and
+// triggering compaction before the overflow point.
+
+/** Default: trigger proactive compaction at 75% of context window. */
+const PROACTIVE_COMPACTION_RATIO = 0.75;
+
+export async function runProactiveCompactionIfNeeded(params: {
+  cfg: OpenClawConfig;
+  followupRun: FollowupRun;
+  defaultModel: string;
+  agentCfgContextTokens?: number;
+  sessionEntry?: SessionEntry;
+  sessionStore?: Record<string, SessionEntry>;
+  sessionKey?: string;
+  storePath?: string;
+}): Promise<{ compacted: boolean; sessionEntry?: SessionEntry }> {
+  const entry =
+    params.sessionEntry ??
+    (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+  if (!entry) {
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  }
+
+  // Skip if provider reports real usage (SDK handles compaction natively)
+  const hasRealUsage =
+    typeof entry.totalTokens === "number" &&
+    Number.isFinite(entry.totalTokens) &&
+    entry.totalTokens > 0 &&
+    entry.totalTokensFresh === true;
+  if (hasRealUsage) {
+    logInfo("proactive-compaction: skipped — provider reports real usage");
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  }
+
+  // Estimate tokens from session file size
+  const sessionFile =
+    entry.sessionFile ??
+    (params.sessionKey
+      ? resolveSessionFilePath(
+          entry.sessionId,
+          entry,
+          resolveSessionFilePathOptions({
+            agentId: resolveAgentIdFromSessionKey(params.sessionKey),
+            storePath: params.storePath,
+          }),
+        )
+      : undefined);
+  const estimatedTokens = estimateTotalTokensFromSessionFile(sessionFile);
+  if (!estimatedTokens || estimatedTokens <= 0) {
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  }
+
+  // Compute threshold
+  const contextWindow = resolveMemoryFlushContextWindowTokens({
+    modelId: params.followupRun.run.model ?? params.defaultModel,
+    agentCfgContextTokens: params.agentCfgContextTokens,
+  });
+  const threshold = Math.floor(contextWindow * PROACTIVE_COMPACTION_RATIO);
+  if (estimatedTokens < threshold) {
+    logInfo(
+      `proactive-compaction: skipped — under threshold (${estimatedTokens}/${threshold} est. tokens)`,
+    );
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  }
+
+  logInfo(
+    `proactive-compaction: triggering — ${estimatedTokens} est. tokens >= ${threshold} threshold (${contextWindow} context window)`,
+  );
+
+  try {
+    const result = await compactEmbeddedPiSession({
+      sessionId: params.followupRun.run.sessionId,
+      sessionKey: params.sessionKey,
+      sessionFile: params.followupRun.run.sessionFile,
+      workspaceDir: params.followupRun.run.workspaceDir,
+      agentDir: params.followupRun.run.agentDir,
+      config: params.followupRun.run.config,
+      skillsSnapshot: params.followupRun.run.skillsSnapshot,
+      provider: params.followupRun.run.provider,
+      model: params.followupRun.run.model,
+      thinkLevel: params.followupRun.run.thinkLevel,
+      reasoningLevel: params.followupRun.run.reasoningLevel,
+      bashElevated: params.followupRun.run.bashElevated,
+      customInstructions: params.cfg?.agents?.defaults?.compaction?.customInstructions,
+      trigger: "overflow",
+      ownerNumbers: params.followupRun.run.ownerNumbers,
+    });
+
+    if (result.ok && result.compacted) {
+      logInfo(
+        `proactive-compaction: completed (${result.result?.tokensBefore ?? "?"} → ${result.result?.tokensAfter ?? "?"} tokens)`,
+      );
+      const nextCount = await incrementCompactionCount({
+        sessionEntry: params.sessionEntry,
+        sessionStore: params.sessionStore,
+        sessionKey: params.sessionKey,
+        storePath: params.storePath,
+        tokensAfter: result.result?.tokensAfter,
+      });
+      let updatedEntry = params.sessionEntry;
+      if (params.storePath && params.sessionKey && typeof nextCount === "number") {
+        try {
+          const persisted = await updateSessionStoreEntry({
+            storePath: params.storePath,
+            sessionKey: params.sessionKey,
+            update: async () => ({
+              compactionCount: nextCount,
+              totalTokens: result.result?.tokensAfter,
+              totalTokensFresh: false,
+            }),
+          });
+          if (persisted) {
+            updatedEntry = persisted;
+          }
+        } catch (err) {
+          logVerbose(`proactive-compaction: failed to persist metadata: ${String(err)}`);
+        }
+      }
+      return { compacted: true, sessionEntry: updatedEntry };
+    }
+
+    logInfo(`proactive-compaction: did not compact — ${result.reason ?? "nothing to compact"}`);
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  } catch (err) {
+    logVerbose(`proactive-compaction: failed — ${String(err)}`);
+    return { compacted: false, sessionEntry: params.sessionEntry };
+  }
 }

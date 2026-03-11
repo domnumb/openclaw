@@ -30,7 +30,7 @@ import {
   isAudioPayload,
   signalTypingIfNeeded,
 } from "./agent-runner-helpers.js";
-import { runMemoryFlushIfNeeded } from "./agent-runner-memory.js";
+import { runMemoryFlushIfNeeded, runProactiveCompactionIfNeeded } from "./agent-runner-memory.js";
 import { buildReplyPayloads } from "./agent-runner-payloads.js";
 import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-utils.js";
 import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
@@ -205,6 +205,25 @@ export async function runReplyAgent(params: {
     storePath,
     isHeartbeat,
   });
+
+  // Proactive compaction: when the provider doesn't report usage, the SDK
+  // never triggers auto-compaction. Estimate tokens from file size and
+  // compact before the session overflows and gets reset.
+  {
+    const compactionResult = await runProactiveCompactionIfNeeded({
+      cfg,
+      followupRun,
+      defaultModel,
+      agentCfgContextTokens,
+      sessionEntry: activeSessionEntry,
+      sessionStore: activeSessionStore,
+      sessionKey,
+      storePath,
+    });
+    if (compactionResult.sessionEntry) {
+      activeSessionEntry = compactionResult.sessionEntry;
+    }
+  }
 
   const runFollowupTurn = createFollowupRunner({
     opts,
