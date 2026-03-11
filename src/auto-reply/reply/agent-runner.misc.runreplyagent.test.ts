@@ -742,7 +742,7 @@ describe("runReplyAgent messaging tool suppression", () => {
     });
   }
 
-  it("drops replies when a messaging tool sent via the same provider + target", async () => {
+  it("delivers non-duplicate replies even when messaging tool sent to same provider + target", async () => {
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "hello world!" }],
       messagingToolSentTexts: ["different message"],
@@ -752,7 +752,7 @@ describe("runReplyAgent messaging tool suppression", () => {
 
     const result = await createRun("slack");
 
-    expect(result).toBeUndefined();
+    expect(result).toMatchObject({ text: "hello world!" });
   });
 
   it("delivers replies when tool provider does not match", async () => {
@@ -788,7 +788,7 @@ describe("runReplyAgent messaging tool suppression", () => {
     expect(result).toMatchObject({ text: "hello world!" });
   });
 
-  it("persists usage fields even when replies are suppressed", async () => {
+  it("persists usage fields when messaging tool sent to same provider (replies delivered)", async () => {
     const storePath = path.join(
       await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-session-store-")),
       "sessions.json",
@@ -812,12 +812,11 @@ describe("runReplyAgent messaging tool suppression", () => {
 
     const result = await createRun("slack", { storePath, sessionKey });
 
-    expect(result).toBeUndefined();
+    // Replies are now delivered (dedup handles actual duplicates, not blanket suppress)
+    expect(result).toMatchObject({ text: "hello world!" });
     const store = loadSessionStore(storePath, { skipCache: true });
     expect(store[sessionKey]?.inputTokens).toBe(10);
     expect(store[sessionKey]?.outputTokens).toBe(5);
-    expect(store[sessionKey]?.totalTokens).toBeUndefined();
-    expect(store[sessionKey]?.totalTokensFresh).toBe(false);
     expect(store[sessionKey]?.model).toBe("claude-opus-4-5");
   });
 
@@ -846,7 +845,8 @@ describe("runReplyAgent messaging tool suppression", () => {
 
     const result = await createRun("slack", { storePath, sessionKey });
 
-    expect(result).toBeUndefined();
+    // Replies are now delivered (dedup handles actual duplicates, not blanket suppress)
+    expect(result).toMatchObject({ text: "hello world!" });
     const store = loadSessionStore(storePath, { skipCache: true });
     expect(store[sessionKey]?.totalTokens).toBe(42_000);
     expect(store[sessionKey]?.totalTokensFresh).toBe(true);

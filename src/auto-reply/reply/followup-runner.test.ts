@@ -236,7 +236,7 @@ describe("createFollowupRunner messaging tool dedupe", () => {
     expect(onBlockReply).toHaveBeenCalledTimes(1);
   });
 
-  it("suppresses replies when a messaging tool sent via the same provider + target", async () => {
+  it("delivers non-duplicate replies even when messaging tool sent to same provider + target", async () => {
     const onBlockReply = vi.fn(async () => {});
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "hello world!" }],
@@ -254,10 +254,10 @@ describe("createFollowupRunner messaging tool dedupe", () => {
 
     await runner(baseQueuedRun("slack"));
 
-    expect(onBlockReply).not.toHaveBeenCalled();
+    expect(onBlockReply).toHaveBeenCalledTimes(1);
   });
 
-  it("persists usage even when replies are suppressed", async () => {
+  it("persists usage when messaging tool sent to same provider (replies still delivered)", async () => {
     const storePath = path.join(
       await fs.mkdtemp(path.join(tmpdir(), "openclaw-followup-usage-")),
       "sessions.json",
@@ -295,7 +295,8 @@ describe("createFollowupRunner messaging tool dedupe", () => {
 
     await runner(baseQueuedRun("slack"));
 
-    expect(onBlockReply).not.toHaveBeenCalled();
+    // Replies are now delivered (dedup handles actual duplicates, not blanket suppress)
+    expect(onBlockReply).toHaveBeenCalledTimes(1);
     const store = loadSessionStore(storePath, { skipCache: true });
     // totalTokens should reflect the last call usage snapshot, not the accumulated input.
     expect(store[sessionKey]?.totalTokens).toBe(400);
