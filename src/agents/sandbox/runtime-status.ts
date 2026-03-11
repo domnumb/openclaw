@@ -11,6 +11,10 @@ function shouldSandboxSession(cfg: SandboxConfig, sessionKey: string, mainSessio
   if (cfg.mode === "off") {
     return false;
   }
+  // Cron sessions are system-level execution contexts — never sandbox them
+  if (sessionKey.includes(":cron:")) {
+    return false;
+  }
   if (cfg.mode === "all") {
     return true;
   }
