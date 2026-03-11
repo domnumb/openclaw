@@ -16,6 +16,7 @@ import {
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
+import { logInfo } from "../../logger.js";
 import { buildThreadingToolContext, resolveEnforceFinalTag } from "./agent-runner-utils.js";
 import {
   type MemoryFlushSettings,
@@ -71,7 +72,7 @@ export async function runMemoryFlushIfNeeded(params: {
 }): Promise<SessionEntry | undefined> {
   const memoryFlushSettings = resolveMemoryFlushSettings(params.cfg);
   if (!memoryFlushSettings) {
-    logVerbose("memory flush: disabled in config");
+    logInfo("memory-flush: disabled in config");
     return params.sessionEntry;
   }
 
@@ -122,7 +123,7 @@ export async function runMemoryFlushIfNeeded(params: {
                 modelId: params.followupRun.run.model ?? params.defaultModel,
                 agentCfgContextTokens: params.agentCfgContextTokens,
               });
-      logVerbose(`memory flush skipped: ${reason}`);
+      logInfo(`memory-flush: skipped — ${reason}`);
     }
     return params.sessionEntry;
   }
@@ -236,7 +237,7 @@ export async function runMemoryFlushIfNeeded(params: {
         });
         if (updatedEntry) {
           activeSessionEntry = updatedEntry;
-          logVerbose(`memory flush completed (compaction=${memoryFlushCompactionCount})`);
+          logInfo(`memory-flush: completed (compaction=${memoryFlushCompactionCount})`);
         }
       } catch (err) {
         logVerbose(`failed to persist memory flush metadata: ${String(err)}`);
