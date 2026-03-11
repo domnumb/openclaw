@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -95,7 +96,9 @@ describe("initSessionState thread forking", () => {
     const parsedHeader = JSON.parse(headerLine) as {
       parentSession?: string;
     };
-    expect(parsedHeader.parentSession).toBe(parentSessionFile);
+    // realpathSync.native resolves /var → /private/var on macOS
+    const canonicalParent = fsSync.realpathSync.native(parentSessionFile);
+    expect(parsedHeader.parentSession).toBe(canonicalParent);
   });
 
   it("records topic-specific session files when MessageThreadId is present", async () => {

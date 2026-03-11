@@ -1,8 +1,26 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expandHomePrefix, resolveRequiredHomeDir } from "../../infra/home-dir.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
 import { resolveStateDir } from "../paths.js";
+
+/**
+ * Normalize a path via fs.realpathSync.native to resolve symlinks and
+ * filesystem case (important on case-insensitive macOS APFS/HFS+ volumes
+ * where /Users/mael/Projects and /Users/mael/projects are the same directory
+ * but string comparison treats them as different).
+ * Uses the native realpath(3) which returns the canonical on-disk casing.
+ * Falls back to path.resolve when the path doesn't exist yet.
+ */
+function realResolve(p: string): string {
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
 
 function resolveAgentSessionsDir(
   agentId?: string,
@@ -76,8 +94,8 @@ function resolvePathFromAgentSessionsDir(
   agentSessionsDir: string,
   candidateAbsPath: string,
 ): string | undefined {
-  const agentBase = path.resolve(agentSessionsDir);
-  const relative = path.relative(agentBase, candidateAbsPath);
+  const agentBase = realResolve(agentSessionsDir);
+  const relative = path.relative(agentBase, realResolve(candidateAbsPath));
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
     return undefined;
   }
@@ -121,11 +139,14 @@ function resolvePathWithinSessionsDir(
   if (!trimmed) {
     throw new Error("Session file path must not be empty");
   }
-  const resolvedBase = path.resolve(sessionsDir);
+  const resolvedBase = realResolve(sessionsDir);
   // Normalize absolute paths that are within the sessions directory.
   // Older versions stored absolute sessionFile paths in sessions.json;
   // convert them to relative so the containment check passes.
-  const normalized = path.isAbsolute(trimmed) ? path.relative(resolvedBase, trimmed) : trimmed;
+  // Use realResolve on the candidate too so that case differences on
+  // case-insensitive filesystems (e.g., macOS HFS+/APFS) are normalized.
+  const realTrimmed = path.isAbsolute(trimmed) ? realResolve(trimmed) : trimmed;
+  const normalized = path.isAbsolute(trimmed) ? path.relative(resolvedBase, realTrimmed) : trimmed;
   if (normalized.startsWith("..") && path.isAbsolute(trimmed)) {
     const tryAgentFallback = (agentId: string): string | undefined => {
       const normalizedAgentId = normalizeAgentId(agentId);
