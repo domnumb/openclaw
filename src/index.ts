@@ -82,6 +82,15 @@ if (isMain) {
   installUnhandledRejectionHandler();
 
   process.on("uncaughtException", (error) => {
+    const msg = error instanceof Error ? error.message : String(error);
+    // @buape/carbon heartbeat zombie connection bug — non-fatal, let it reconnect
+    if (msg.includes("zombie connection")) {
+      console.error(
+        "[openclaw] Caught zombie connection error (non-fatal, Discord will reconnect):",
+        msg,
+      );
+      return;
+    }
     console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
     process.exit(1);
   });

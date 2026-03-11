@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { resolveStateDir } from "../config/paths.js";
 
 /**
@@ -38,10 +38,11 @@ export function getAgentScopedMediaLocalRoots(
   agentId?: string,
 ): readonly string[] {
   const roots = buildMediaLocalRoots(resolveStateDir());
-  if (!agentId?.trim()) {
+  const effectiveAgentId = agentId?.trim() || resolveDefaultAgentId(cfg);
+  if (!effectiveAgentId) {
     return roots;
   }
-  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+  const workspaceDir = resolveAgentWorkspaceDir(cfg, effectiveAgentId);
   if (!workspaceDir) {
     return roots;
   }
