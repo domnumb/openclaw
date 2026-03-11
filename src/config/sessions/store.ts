@@ -719,7 +719,14 @@ async function withSessionStoreLock<T>(
       `withSessionStoreLock: storePath must be a non-empty string, got ${JSON.stringify(storePath)}`,
     );
   }
-  const timeoutMs = opts.timeoutMs ?? 10_000;
+  // FIX: Normalize storePath to prevent case-mismatch on macOS creating separate lock queues
+  // for the same file (e.g., /Users/mael/Projects/ vs /Users/mael/projects/).
+  try {
+    storePath = fs.realpathSync(storePath);
+  } catch {
+    storePath = path.resolve(storePath);
+  }
+  const timeoutMs = opts.timeoutMs ?? 30_000;
   const staleMs = opts.staleMs ?? 30_000;
   // `pollIntervalMs` is retained for API compatibility with older lock options.
   void opts.pollIntervalMs;
