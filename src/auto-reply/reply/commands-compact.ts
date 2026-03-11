@@ -102,7 +102,8 @@ export const handleCompactCommand: CommandHandler = async (params) => {
       allowed: false,
       defaultLevel: "off",
     },
-    customInstructions,
+    customInstructions:
+      customInstructions ?? params.cfg?.agents?.defaults?.compaction?.customInstructions,
     trigger: "manual",
     senderIsOwner: params.command.senderIsOwner,
     ownerNumbers: params.command.ownerList.length > 0 ? params.command.ownerList : undefined,

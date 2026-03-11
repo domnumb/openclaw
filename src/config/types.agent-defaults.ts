@@ -258,6 +258,9 @@ export type AgentCompactionConfig = {
   reserveTokensFloor?: number;
   /** Max share of context window for history during safeguard pruning (0.1–0.9, default 0.5). */
   maxHistoryShare?: number;
+  /** Domain-specific instructions injected into the summarization prompt during compaction.
+   *  Tells the LLM summarizer what to preserve verbatim vs. what can be condensed. */
+  customInstructions?: string;
   /** Pre-compaction memory flush (agentic turn). Default: enabled. */
   memoryFlush?: AgentCompactionMemoryFlushConfig;
 };

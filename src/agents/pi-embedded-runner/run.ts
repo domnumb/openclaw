@@ -591,6 +591,7 @@ export async function runEmbeddedPiAgent(
                 bashElevated: params.bashElevated,
                 extraSystemPrompt: params.extraSystemPrompt,
                 ownerNumbers: params.ownerNumbers,
+                customInstructions: params.config?.agents?.defaults?.compaction?.customInstructions,
                 trigger: "overflow",
                 diagId: overflowDiagId,
                 attempt: overflowCompactionAttempts,
