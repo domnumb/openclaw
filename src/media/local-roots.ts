@@ -1,13 +1,27 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolveStateDir } from "../config/paths.js";
 
+/**
+ * Resolve a path to its canonical form (following symlinks and normalizing case
+ * on case-insensitive filesystems like macOS HFS+/APFS).
+ * Falls back to path.resolve() if realpath fails (directory may not exist yet).
+ */
+function canonicalize(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 function buildMediaLocalRoots(stateDir: string): string[] {
-  const resolvedStateDir = path.resolve(stateDir);
+  const resolvedStateDir = canonicalize(stateDir);
   return [
-    os.tmpdir(),
+    canonicalize(os.tmpdir()),
     path.join(resolvedStateDir, "media"),
     path.join(resolvedStateDir, "agents"),
     path.join(resolvedStateDir, "workspace"),
@@ -31,7 +45,7 @@ export function getAgentScopedMediaLocalRoots(
   if (!workspaceDir) {
     return roots;
   }
-  const normalizedWorkspaceDir = path.resolve(workspaceDir);
+  const normalizedWorkspaceDir = canonicalize(workspaceDir);
   if (!roots.includes(normalizedWorkspaceDir)) {
     roots.push(normalizedWorkspaceDir);
   }

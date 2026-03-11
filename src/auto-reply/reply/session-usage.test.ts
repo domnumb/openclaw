@@ -50,14 +50,19 @@ describe("persistSessionUsageUpdate", () => {
     expect(stored[sessionKey].outputTokens).toBe(10_000);
   });
 
-  it("marks totalTokens as unknown when no fresh context snapshot is available", async () => {
+  it("preserves previous totalTokens when no fresh context snapshot is available", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-usage-"));
     const storePath = path.join(tmp, "sessions.json");
     const sessionKey = "main";
     await seedSessionStore({
       storePath,
       sessionKey,
-      entry: { sessionId: "s1", updatedAt: Date.now() },
+      entry: {
+        sessionId: "s1",
+        updatedAt: Date.now(),
+        totalTokens: 70_000,
+        totalTokensFresh: true,
+      },
     });
 
     await persistSessionUsageUpdate({
@@ -68,8 +73,10 @@ describe("persistSessionUsageUpdate", () => {
     });
 
     const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
-    expect(stored[sessionKey].totalTokens).toBeUndefined();
-    expect(stored[sessionKey].totalTokensFresh).toBe(false);
+    // totalTokens should be preserved (not clobbered with undefined)
+    expect(stored[sessionKey].totalTokens).toBe(70_000);
+    // totalTokensFresh should remain unchanged (not overwritten to false)
+    expect(stored[sessionKey].totalTokensFresh).toBe(true);
   });
 
   it("uses promptTokens when available without lastCallUsage", async () => {

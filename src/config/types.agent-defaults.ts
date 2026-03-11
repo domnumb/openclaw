@@ -271,4 +271,6 @@ export type AgentCompactionMemoryFlushConfig = {
   prompt?: string;
   /** System prompt appended for the memory flush turn. */
   systemPrompt?: string;
+  /** Allow memory flush during heartbeat turns (default: true). */
+  allowHeartbeat?: boolean;
 };

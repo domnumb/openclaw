@@ -29,6 +29,7 @@ async function runReplyAgentWithBase(params: {
   sessionEntry: Record<string, unknown>;
   commandBody: string;
   typingMode?: "instant";
+  isHeartbeat?: boolean;
 }): Promise<void> {
   const { typing, sessionCtx, resolvedQueue, followupRun } = params.baseRun;
   await runReplyAgent({
@@ -40,6 +41,7 @@ async function runReplyAgentWithBase(params: {
     shouldFollowup: false,
     isActive: false,
     isStreaming: false,
+    opts: params.isHeartbeat ? { isHeartbeat: true } : undefined,
     typing,
     sessionCtx,
     sessionEntry: params.sessionEntry,
@@ -371,6 +373,115 @@ describe("runReplyAgent memory flush", () => {
 
   it("skips memory flush when the sandbox workspace is none", async () => {
     await expectMemoryFlushSkippedWithWorkspaceAccess("none");
+  });
+
+  it("runs memory flush during heartbeat when allowHeartbeat is true", async () => {
+    const runEmbeddedPiAgentMock = getRunEmbeddedPiAgentMock();
+    runEmbeddedPiAgentMock.mockReset();
+
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        totalTokens: 80_000,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string }> = [];
+      runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({ prompt: params.prompt });
+        if (params.prompt === DEFAULT_MEMORY_FLUSH_PROMPT) {
+          return { payloads: [], meta: {} };
+        }
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        config: {
+          agents: {
+            defaults: {
+              compaction: {
+                memoryFlush: { allowHeartbeat: true },
+              },
+            },
+          },
+        },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+        isHeartbeat: true,
+      });
+
+      expect(calls.map((call) => call.prompt)).toEqual([DEFAULT_MEMORY_FLUSH_PROMPT, "hello"]);
+
+      const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+      expect(stored[sessionKey].memoryFlushAt).toBeTypeOf("number");
+    });
+  });
+
+  it("skips memory flush during heartbeat when allowHeartbeat is false", async () => {
+    const runEmbeddedPiAgentMock = getRunEmbeddedPiAgentMock();
+    runEmbeddedPiAgentMock.mockReset();
+
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        totalTokens: 80_000,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const calls: Array<{ prompt?: string }> = [];
+      runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push({ prompt: params.prompt });
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        config: {
+          agents: {
+            defaults: {
+              compaction: {
+                memoryFlush: { allowHeartbeat: false },
+              },
+            },
+          },
+        },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+        isHeartbeat: true,
+      });
+
+      // Only the main prompt, no flush
+      expect(calls.map((call) => call.prompt)).toEqual(["hello"]);
+    });
   });
 
   it("increments compaction count when flush compaction completes", async () => {

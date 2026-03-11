@@ -86,9 +86,9 @@ export async function persistSessionUsageUpdate(params: {
           const patch: Partial<SessionEntry> = {
             inputTokens: input,
             outputTokens: output,
-            // Missing a last-call snapshot means context utilization is stale/unknown.
-            totalTokens,
-            totalTokensFresh: typeof totalTokens === "number",
+            // Only overwrite totalTokens when we have a fresh snapshot.
+            // Preserve last known value otherwise (cron or previous turn may have set it).
+            ...(typeof totalTokens === "number" ? { totalTokens, totalTokensFresh: true } : {}),
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
             contextTokens: resolvedContextTokens,

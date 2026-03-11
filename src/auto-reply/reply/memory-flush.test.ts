@@ -25,6 +25,22 @@ describe("memory flush settings", () => {
     ).toBeNull();
   });
 
+  it("defaults allowHeartbeat to true", () => {
+    const settings = resolveMemoryFlushSettings();
+    expect(settings?.allowHeartbeat).toBe(true);
+  });
+
+  it("respects allowHeartbeat false", () => {
+    const settings = resolveMemoryFlushSettings({
+      agents: {
+        defaults: {
+          compaction: { memoryFlush: { allowHeartbeat: false } },
+        },
+      },
+    });
+    expect(settings?.allowHeartbeat).toBe(false);
+  });
+
   it("appends NO_REPLY hint when missing", () => {
     const settings = resolveMemoryFlushSettings({
       agents: {
@@ -114,7 +130,7 @@ describe("shouldRunMemoryFlush", () => {
     ).toBe(true);
   });
 
-  it("ignores stale cached totals", () => {
+  it("accepts stale cached totals for flush decisions", () => {
     expect(
       shouldRunMemoryFlush({
         entry: { totalTokens: 96_000, totalTokensFresh: false, compactionCount: 1 },
@@ -122,7 +138,7 @@ describe("shouldRunMemoryFlush", () => {
         reserveTokensFloor: 5_000,
         softThresholdTokens: 2_000,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

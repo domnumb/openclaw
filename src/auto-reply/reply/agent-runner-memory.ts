@@ -18,11 +18,42 @@ import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { buildThreadingToolContext, resolveEnforceFinalTag } from "./agent-runner-utils.js";
 import {
+  type MemoryFlushSettings,
   resolveMemoryFlushContextWindowTokens,
   resolveMemoryFlushSettings,
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
 import { incrementCompactionCount } from "./session-updates.js";
+
+function resolveFlushSkipReason(
+  entry:
+    | Pick<
+        SessionEntry,
+        "totalTokens" | "totalTokensFresh" | "compactionCount" | "memoryFlushCompactionCount"
+      >
+    | undefined,
+  settings: MemoryFlushSettings,
+  ctxParams: { modelId?: string; agentCfgContextTokens?: number },
+): string {
+  const totalTokens = entry?.totalTokens;
+  if (typeof totalTokens !== "number" || !Number.isFinite(totalTokens) || totalTokens <= 0) {
+    return totalTokens === undefined ? "no-totalTokens" : `invalid-totalTokens(${totalTokens})`;
+  }
+  const contextWindow = resolveMemoryFlushContextWindowTokens(ctxParams);
+  const threshold = Math.max(
+    0,
+    contextWindow - settings.reserveTokensFloor - settings.softThresholdTokens,
+  );
+  if (totalTokens < threshold) {
+    return `under-threshold(${totalTokens}/${threshold})`;
+  }
+  const compactionCount = entry?.compactionCount ?? 0;
+  const lastFlushAt = entry?.memoryFlushCompactionCount;
+  if (typeof lastFlushAt === "number" && lastFlushAt === compactionCount) {
+    return `already-flushed(compaction=${compactionCount})`;
+  }
+  return `unknown(${totalTokens})`;
+}
 
 export async function runMemoryFlushIfNeeded(params: {
   cfg: OpenClawConfig;
@@ -40,6 +71,7 @@ export async function runMemoryFlushIfNeeded(params: {
 }): Promise<SessionEntry | undefined> {
   const memoryFlushSettings = resolveMemoryFlushSettings(params.cfg);
   if (!memoryFlushSettings) {
+    logVerbose("memory flush: disabled in config");
     return params.sessionEntry;
   }
 
@@ -61,7 +93,7 @@ export async function runMemoryFlushIfNeeded(params: {
   const shouldFlushMemory =
     memoryFlushSettings &&
     memoryFlushWritable &&
-    !params.isHeartbeat &&
+    (!params.isHeartbeat || memoryFlushSettings.allowHeartbeat) &&
     !isCliProvider(params.followupRun.run.provider, params.cfg) &&
     shouldRunMemoryFlush({
       entry:
@@ -76,6 +108,22 @@ export async function runMemoryFlushIfNeeded(params: {
     });
 
   if (!shouldFlushMemory) {
+    if (memoryFlushSettings) {
+      const entry =
+        params.sessionEntry ??
+        (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+      const reason = !memoryFlushWritable
+        ? "sandbox-ro"
+        : params.isHeartbeat && !memoryFlushSettings.allowHeartbeat
+          ? "heartbeat-excluded"
+          : isCliProvider(params.followupRun.run.provider, params.cfg)
+            ? "cli-provider"
+            : resolveFlushSkipReason(entry, memoryFlushSettings, {
+                modelId: params.followupRun.run.model ?? params.defaultModel,
+                agentCfgContextTokens: params.agentCfgContextTokens,
+              });
+      logVerbose(`memory flush skipped: ${reason}`);
+    }
     return params.sessionEntry;
   }
 
@@ -188,6 +236,7 @@ export async function runMemoryFlushIfNeeded(params: {
         });
         if (updatedEntry) {
           activeSessionEntry = updatedEntry;
+          logVerbose(`memory flush completed (compaction=${memoryFlushCompactionCount})`);
         }
       } catch (err) {
         logVerbose(`failed to persist memory flush metadata: ${String(err)}`);
