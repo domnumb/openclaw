@@ -91,6 +91,29 @@ if (isMain) {
       );
       return;
     }
+    // @buape/carbon v0.14.0 "Max reconnect attempts" bug — fires when maxAttempts is
+    // set to 0 during graceful shutdown or after a transient WS close (code 1006).
+    // Non-fatal: the circuit breaker / provider-level recovery handles reconnection.
+    if (msg.includes("Max reconnect attempts")) {
+      console.error(
+        "[openclaw] Caught Carbon max-reconnect error (non-fatal, recovery will handle reconnect):",
+        msg,
+      );
+      return;
+    }
+    // @buape/carbon gateway errors that surface as uncaught exceptions — treat as
+    // non-fatal when they look like transient Discord WebSocket issues.
+    if (
+      msg.includes("Fatal Gateway error") ||
+      msg.includes("WebSocket connection closed") ||
+      msg.includes("code 1006")
+    ) {
+      console.error(
+        "[openclaw] Caught Carbon gateway error (non-fatal, Discord will recover):",
+        msg,
+      );
+      return;
+    }
     console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
     process.exit(1);
   });

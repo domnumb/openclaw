@@ -594,52 +594,160 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
   // Timeout to detect zombie connections where HELLO is never received.
   const HELLO_TIMEOUT_MS = 30000;
   let helloTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  // Circuit breaker: detect death spirals (rapid close events) and force clean reconnect.
+  // Carbon resets reconnectAttempts on every WS open, so maxAttempts is never reached
+  // when the connection opens but immediately closes — this catches that pattern.
+  const CIRCUIT_BREAKER_WINDOW_MS = 60_000;
+  const CIRCUIT_BREAKER_THRESHOLD = 5;
+  const CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
+  const closeTimestamps: number[] = [];
+  let circuitBreakerActive = false;
+  let circuitBreakerTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
   const onGatewayDebug = (msg: unknown) => {
     const message = String(msg);
-    if (!message.includes("WebSocket connection opened")) {
+
+    // HELLO timeout detection
+    if (message.includes("WebSocket connection opened")) {
+      if (helloTimeoutId) {
+        clearTimeout(helloTimeoutId);
+      }
+      helloTimeoutId = setTimeout(() => {
+        if (!gateway?.isConnected) {
+          runtime.log?.(
+            danger(
+              `connection stalled: no HELLO received within ${HELLO_TIMEOUT_MS}ms, forcing reconnect`,
+            ),
+          );
+          gateway?.disconnect();
+          gateway?.connect(false);
+        }
+        helloTimeoutId = undefined;
+      }, HELLO_TIMEOUT_MS);
       return;
     }
-    if (helloTimeoutId) {
-      clearTimeout(helloTimeoutId);
-    }
-    helloTimeoutId = setTimeout(() => {
-      if (!gateway?.isConnected) {
+
+    // Circuit breaker: track close events
+    if (message.includes("WebSocket connection closed") && !circuitBreakerActive) {
+      const now = Date.now();
+      closeTimestamps.push(now);
+      // Prune entries outside the window
+      while (closeTimestamps.length > 0 && closeTimestamps[0] < now - CIRCUIT_BREAKER_WINDOW_MS) {
+        closeTimestamps.shift();
+      }
+      if (closeTimestamps.length >= CIRCUIT_BREAKER_THRESHOLD) {
+        circuitBreakerActive = true;
         runtime.log?.(
           danger(
-            `connection stalled: no HELLO received within ${HELLO_TIMEOUT_MS}ms, forcing reconnect`,
+            `discord: death spiral detected (${closeTimestamps.length} closes in ${CIRCUIT_BREAKER_WINDOW_MS / 1000}s) — circuit breaker tripped, clean reconnect in ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s`,
           ),
         );
+        closeTimestamps.length = 0;
+        // Force full disconnect and clear Carbon's session state to prevent resume loops
         gateway?.disconnect();
-        gateway?.connect(false);
+        const gw = gateway as unknown as Record<string, unknown> | undefined;
+        if (gw) {
+          gw.state = { sequence: null, sessionId: null, resumeGatewayUrl: null };
+          gw.sequence = null;
+          gw.reconnectAttempts = 0;
+        }
+        circuitBreakerTimeoutId = setTimeout(() => {
+          circuitBreakerTimeoutId = undefined;
+          circuitBreakerActive = false;
+          runtime.log?.("discord: circuit breaker cooldown elapsed, attempting fresh connect");
+          gateway?.connect(false);
+        }, CIRCUIT_BREAKER_COOLDOWN_MS);
       }
-      helloTimeoutId = undefined;
-    }, HELLO_TIMEOUT_MS);
+    }
   };
   gatewayEmitter?.on("debug", onGatewayDebug);
-  try {
-    await waitForDiscordGatewayStop({
-      gateway: gateway
-        ? {
-            emitter: gatewayEmitter,
-            disconnect: () => gateway.disconnect(),
-          }
-        : undefined,
-      abortSignal,
-      onGatewayError: (err) => {
-        runtime.error?.(danger(`discord gateway error: ${String(err)}`));
-      },
-      shouldStopOnError: (err) => {
-        const message = String(err);
-        return (
-          message.includes("Max reconnect attempts") || message.includes("Fatal Gateway error")
+  // Retry loop: when Carbon emits "Max reconnect attempts" or "Fatal Gateway error",
+  // instead of crashing we reset Carbon's internal state and reconnect after a cooldown.
+  // This handles the v0.14.0 bug where maxAttempts=0 fires immediately after code 1006.
+  const MAX_PROVIDER_RETRIES = 50; // generous upper bound to avoid infinite loops
+  const PROVIDER_RETRY_COOLDOWN_MS = 30_000;
+  let providerRetries = 0;
+
+  const runGatewayLoop = async (): Promise<void> => {
+    while (providerRetries < MAX_PROVIDER_RETRIES) {
+      try {
+        await waitForDiscordGatewayStop({
+          gateway: gateway
+            ? {
+                emitter: gatewayEmitter,
+                disconnect: () => gateway.disconnect(),
+              }
+            : undefined,
+          abortSignal,
+          onGatewayError: (err) => {
+            runtime.error?.(danger(`discord gateway error: ${String(err)}`));
+          },
+          shouldStopOnError: (err) => {
+            const message = String(err);
+            return (
+              message.includes("Max reconnect attempts") || message.includes("Fatal Gateway error")
+            );
+          },
+        });
+        // Clean exit (e.g., abort signal) — stop the loop
+        return;
+      } catch (err) {
+        const errMsg = String(err);
+        const isRecoverable =
+          errMsg.includes("Max reconnect attempts") || errMsg.includes("Fatal Gateway error");
+        if (!isRecoverable || !gateway) {
+          throw err; // non-recoverable or no gateway to reconnect
+        }
+        providerRetries++;
+        runtime.log?.(
+          danger(
+            `discord: Carbon error "${errMsg}" — attempting recovery (${providerRetries}/${MAX_PROVIDER_RETRIES}), cooldown ${PROVIDER_RETRY_COOLDOWN_MS / 1000}s`,
+          ),
         );
-      },
-    });
+        // Reset Carbon's internal gateway state to force a fresh connection
+        const gw = gateway as unknown as Record<string, unknown>;
+        gw.state = { sequence: null, sessionId: null, resumeGatewayUrl: null };
+        gw.sequence = null;
+        gw.reconnectAttempts = 0;
+        // Restore reconnect options (Carbon may have set maxAttempts to 0 during teardown)
+        gateway.options.reconnect = { maxAttempts: 10 };
+        // Wait before retrying
+        await new Promise<void>((resolve) => {
+          const timeoutId = setTimeout(resolve, PROVIDER_RETRY_COOLDOWN_MS);
+          // If abort fires during cooldown, resolve immediately
+          const onAbortDuringCooldown = () => {
+            clearTimeout(timeoutId);
+            resolve();
+          };
+          if (abortSignal?.aborted) {
+            clearTimeout(timeoutId);
+            resolve();
+          } else {
+            abortSignal?.addEventListener("abort", onAbortDuringCooldown, { once: true });
+          }
+        });
+        if (abortSignal?.aborted) {
+          return; // shutting down
+        }
+        runtime.log?.("discord: reconnecting after Carbon error recovery");
+        gateway.connect(false);
+      }
+    }
+    runtime.error?.(
+      danger(`discord: exhausted ${MAX_PROVIDER_RETRIES} recovery attempts — giving up`),
+    );
+  };
+  try {
+    await runGatewayLoop();
   } finally {
     unregisterGateway(account.accountId);
     stopGatewayLogging();
     if (helloTimeoutId) {
       clearTimeout(helloTimeoutId);
+    }
+    if (circuitBreakerTimeoutId) {
+      clearTimeout(circuitBreakerTimeoutId);
     }
     gatewayEmitter?.removeListener("debug", onGatewayDebug);
     abortSignal?.removeEventListener("abort", onAbort);

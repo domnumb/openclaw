@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
@@ -25,6 +26,28 @@ import {
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
 import { incrementCompactionCount } from "./session-updates.js";
+
+/**
+ * Estimate totalTokens from session JSONL file size when the provider
+ * (e.g. claude-max proxy) does not report usage data.
+ * Rough heuristic: ~4 bytes per token in typical JSONL session content.
+ */
+const BYTES_PER_TOKEN_ESTIMATE = 4;
+
+function estimateTotalTokensFromSessionFile(sessionFile?: string): number | undefined {
+  if (!sessionFile) {
+    return undefined;
+  }
+  try {
+    const stat = fs.statSync(sessionFile);
+    if (stat.size <= 0) {
+      return undefined;
+    }
+    return Math.ceil(stat.size / BYTES_PER_TOKEN_ESTIMATE);
+  } catch {
+    return undefined;
+  }
+}
 
 function resolveFlushSkipReason(
   entry:
@@ -91,15 +114,39 @@ export async function runMemoryFlushIfNeeded(params: {
     return sandboxCfg.workspaceAccess === "rw";
   })();
 
+  // Resolve the entry, with a file-size-based totalTokens fallback when the
+  // provider (e.g. claude-max OpenAI-compat proxy) does not report usage.
+  const resolvedEntry: typeof params.sessionEntry = (() => {
+    const entry =
+      params.sessionEntry ??
+      (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+    if (!entry) {
+      return entry;
+    }
+    const hasTotalTokens =
+      typeof entry.totalTokens === "number" &&
+      Number.isFinite(entry.totalTokens) &&
+      entry.totalTokens > 0;
+    if (hasTotalTokens) {
+      return entry;
+    }
+    const estimated = estimateTotalTokensFromSessionFile(entry.sessionFile);
+    if (typeof estimated === "number" && estimated > 0) {
+      logInfo(
+        `memory-flush: totalTokens missing, using file-size estimate (${estimated} tokens from session file)`,
+      );
+      return { ...entry, totalTokens: estimated, totalTokensFresh: false };
+    }
+    return entry;
+  })();
+
   const shouldFlushMemory =
     memoryFlushSettings &&
     memoryFlushWritable &&
     (!params.isHeartbeat || memoryFlushSettings.allowHeartbeat) &&
     !isCliProvider(params.followupRun.run.provider, params.cfg) &&
     shouldRunMemoryFlush({
-      entry:
-        params.sessionEntry ??
-        (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined),
+      entry: resolvedEntry,
       contextWindowTokens: resolveMemoryFlushContextWindowTokens({
         modelId: params.followupRun.run.model ?? params.defaultModel,
         agentCfgContextTokens: params.agentCfgContextTokens,
@@ -110,16 +157,13 @@ export async function runMemoryFlushIfNeeded(params: {
 
   if (!shouldFlushMemory) {
     if (memoryFlushSettings) {
-      const entry =
-        params.sessionEntry ??
-        (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
       const reason = !memoryFlushWritable
         ? "sandbox-ro"
         : params.isHeartbeat && !memoryFlushSettings.allowHeartbeat
           ? "heartbeat-excluded"
           : isCliProvider(params.followupRun.run.provider, params.cfg)
             ? "cli-provider"
-            : resolveFlushSkipReason(entry, memoryFlushSettings, {
+            : resolveFlushSkipReason(resolvedEntry, memoryFlushSettings, {
                 modelId: params.followupRun.run.model ?? params.defaultModel,
                 agentCfgContextTokens: params.agentCfgContextTokens,
               });

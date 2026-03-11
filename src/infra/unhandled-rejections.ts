@@ -117,6 +117,24 @@ export function isTransientNetworkError(err: unknown): boolean {
   return false;
 }
 
+/**
+ * Checks if an error originates from @buape/carbon's gateway (Discord WebSocket).
+ * These are transient issues — zombie connections, max-reconnect after code 1006, etc.
+ * They should not crash the process; provider-level recovery handles reconnection.
+ */
+export function isCarbonGatewayError(err: unknown): boolean {
+  if (!err) {
+    return false;
+  }
+  const message = err instanceof Error ? err.message : typeof err === "string" ? err : String(err);
+  return (
+    message.includes("Max reconnect attempts") ||
+    message.includes("zombie connection") ||
+    message.includes("Fatal Gateway error") ||
+    (message.includes("WebSocket") && message.includes("1006"))
+  );
+}
+
 export function registerUnhandledRejectionHandler(handler: UnhandledRejectionHandler): () => void {
   handlers.add(handler);
   return () => {
@@ -168,6 +186,16 @@ export function installUnhandledRejectionHandler(): void {
     if (isTransientNetworkError(reason)) {
       console.warn(
         "[openclaw] Non-fatal unhandled rejection (continuing):",
+        formatUncaughtError(reason),
+      );
+      return;
+    }
+
+    // @buape/carbon v0.14.0 errors that may surface as unhandled rejections.
+    // These are transient Discord WebSocket issues — non-fatal, recovery handles them.
+    if (isCarbonGatewayError(reason)) {
+      console.warn(
+        "[openclaw] Non-fatal Carbon gateway rejection (continuing):",
         formatUncaughtError(reason),
       );
       return;
